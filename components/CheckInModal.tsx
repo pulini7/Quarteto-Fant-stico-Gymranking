@@ -48,9 +48,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: facingMode,
-          // Pede resolução menor para iniciar mais rápido
-          width: { ideal: 640 }, 
-          height: { ideal: 480 }
+          // Pede resolução baixa para iniciar rápido e compatível com celulares antigos
+          width: { ideal: 480 }, 
+          height: { ideal: 640 }
         } 
       });
       
@@ -79,9 +79,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       
       if (video.readyState !== 4) return; // Wait for video to be ready
 
-      // AGGRESSIVE OPTIMIZATION: 480px width max, 0.5 quality
-      // This ensures the base64 string is tiny (~30-50kb) preventing UI freeze during transfer
-      const MAX_WIDTH = 480;
+      // EXTREME OPTIMIZATION: 320px width max.
+      // Isso cria uma imagem de ~15kb. Impossível falhar o upload.
+      const MAX_WIDTH = 320;
       const scale = video.videoWidth > MAX_WIDTH ? MAX_WIDTH / video.videoWidth : 1;
       
       canvas.width = video.videoWidth * scale;
@@ -97,8 +97,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Compressão JPEG 0.5 (Quality vs Size tradeoff optimized for mobile networks)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+        // Compressão JPEG 0.4 (Qualidade baixa, mas suficiente para comprovação)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
         
         setPreview(dataUrl);
         stopCamera();
@@ -106,7 +106,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         // Start AI Analysis em Background
         setAnalyzing(true);
         analyzeWorkoutImage(dataUrl).then((suggestion) => {
-             if (!isMountedRef.current) return; // Prevent update if unmounted
+             if (!isMountedRef.current) return; 
              
              if (suggestion) {
                  setCaption(prev => {
@@ -128,7 +128,6 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     setCaption('');
     setSelectedTags([]);
     setAnalyzing(false);
-    // O useEffect cuidará de reiniciar a câmera pois preview mudou para null
   };
 
   const toggleCamera = () => {
@@ -145,30 +144,28 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     );
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (preview && !isSubmitting) {
         setIsSubmitting(true);
         playSound.success();
         
-        // Combina a legenda com as tags selecionadas
-        let finalCaption = caption.trim();
-        if (selectedTags.length > 0) {
-            const tagsString = selectedTags.map(t => `#${t}`).join(' ');
-            finalCaption = finalCaption ? `${finalCaption}\n\n${tagsString}` : tagsString;
-        }
-
-        // Safety Timeout: If network hangs for 10s, release button
-        const safetyTimer = setTimeout(() => {
-            if (isMountedRef.current) {
-                setIsSubmitting(false);
-                alert("O envio está demorando muito. Verifique sua conexão e tente novamente.");
+        try {
+            // Combina a legenda com as tags selecionadas
+            let finalCaption = caption.trim();
+            if (selectedTags.length > 0) {
+                const tagsString = selectedTags.map(t => `#${t}`).join(' ');
+                finalCaption = finalCaption ? `${finalCaption}\n\n${tagsString}` : tagsString;
             }
-        }, 15000);
 
-        // We wrap onConfirm to clear timeout if it returns successfully (though modal closes usually)
-        Promise.resolve(onConfirm(preview, finalCaption)).finally(() => {
-            clearTimeout(safetyTimer);
-        });
+            // Chama a função pai e espera ela resolver
+            await onConfirm(preview, finalCaption);
+            
+            // O modal fechará automaticamente via props, mas se falhar, liberamos:
+        } catch (error) {
+            console.error("Erro no envio:", error);
+            alert("Erro ao enviar. Tente novamente.");
+            setIsSubmitting(false);
+        }
     }
   };
 

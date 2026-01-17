@@ -390,13 +390,14 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 
   const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
   
-  if (fetchError) {
-      // ... Local DB fallback logic (omitted for brevity, assume similar structure)
-       const db = getLocalDB();
-      const user = db.users.find((u: any) => u.id === userId);
+  // FALLBACK FUNCTION (Repeated logic for fallback)
+  const saveToLocalFallback = async (fallbackUserId: string, fallbackPhoto: string, fallbackCaption: string) => {
+      console.log("Saving checkin to local storage fallback");
+      const db = getLocalDB();
+      const user = db.users.find((u: any) => u.id === fallbackUserId);
       if (!user) return null;
 
-      const userCheckIns = db.check_ins.filter((c: any) => c.user_id === userId);
+      const userCheckIns = db.check_ins.filter((c: any) => c.user_id === fallbackUserId);
       if (userCheckIns.some((c: any) => c.date === today)) {
           return await loginOrCreateUser(user.name);
       }
@@ -406,12 +407,12 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 
       const newCheckIn = {
           id: Date.now().toString(),
-          user_id: userId,
+          user_id: fallbackUserId,
           date: today,
           timestamp: new Date().toISOString(),
-          photo: photoBase64,
+          photo: fallbackPhoto,
           videos: [],
-          caption: caption,
+          caption: fallbackCaption,
           likes: []
       };
       db.check_ins.push(newCheckIn);
@@ -419,34 +420,38 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       user.streak = newStreak;
       saveLocalDB(db);
       return await loginOrCreateUser(user.name);
+  };
+
+  if (fetchError || !userDB) {
+      return await saveToLocalFallback(userId, photoBase64, caption);
   }
 
-  // SUPABASE SUCCESS FLOW
-  if (!userDB) return null;
-
+  // SUPABASE SUCCESS FLOW START
   const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
   if (hasCheckInToday) return await loginOrCreateUser(userDB.name);
 
   const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
   const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
 
+  // Try INSERT into Supabase
   const { error: checkInError } = await supabase.from('check_ins').insert({
       id: Date.now().toString(),
       user_id: userId,
       date: today,
       timestamp: new Date().toISOString(),
-      photo: photoBase64, // base64 is already optimized (small) from CheckInModal
+      photo: photoBase64, 
       videos: [],
       caption: caption,
       likes: []
   });
 
+  // CRITICAL FAIL-SAFE: If Supabase fails (e.g. payload too large), Fallback to Local Storage
   if (checkInError) {
-      console.error(checkInError);
-      return null;
+      console.error("Supabase CheckIn Failed (Fallback to Local):", checkInError);
+      return await saveToLocalFallback(userId, photoBase64, caption);
   }
 
-  // Update user stats
+  // Update user stats in Supabase
   await supabase.from('users').update({
       score: newScore,
       streak: newStreak
