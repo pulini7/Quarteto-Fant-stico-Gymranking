@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { loginOrCreateUser, getUsersLight, saveUser, getUserByName } from '../services/storageService';
+import { loginOrCreateUser, getUsersLight, saveUser, getUserByName, resetUserByName } from '../services/storageService';
 import { User } from '../types';
 import { Button } from './Button';
 
@@ -153,6 +153,26 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  const handleResetUser = async () => {
+      if (!loginName.trim()) {
+          setError("Digite o email/nome para resetar.");
+          return;
+      }
+      if (!window.confirm(`Tem certeza que deseja apagar TUDO de ${loginName}?`)) return;
+
+      setLoading(true);
+      const success = await resetUserByName(loginName);
+      setLoading(false);
+      
+      if (success) {
+          setError("Usuário resetado com sucesso! ✅");
+          setLoginName('');
+          setLoginPassword('');
+      } else {
+          setError("Usuário não encontrado.");
+      }
+  };
+
   if (loading && !selectedUser && !showLoginArea) {
       return <div className="min-h-screen flex items-center justify-center text-brand-primary">Carregando GymRanking...</div>;
   }
@@ -182,7 +202,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                             <input type="checkbox" id="generic-remember" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="accent-brand-primary cursor-pointer" />
                             <label htmlFor="generic-remember" className="text-xs text-slate-400 cursor-pointer select-none">Manter conectado</label>
                         </div>
-                        <button type="submit" className="bg-brand-primary text-white text-sm font-bold px-3 py-2 rounded hover:bg-blue-600 transition-colors shadow-lg mt-1">Entrar</button>
+                        <div className="flex gap-2 mt-1">
+                            <button type="submit" className="flex-1 bg-brand-primary text-white text-sm font-bold px-3 py-2 rounded hover:bg-pink-600 transition-colors shadow-lg">Entrar</button>
+                            <button type="button" onClick={handleResetUser} className="bg-slate-700 text-slate-300 text-xs font-bold px-3 py-2 rounded hover:bg-red-900 hover:text-white transition-colors" title="Resetar Usuário">🗑️</button>
+                        </div>
                     </form>
                     {error && <span className="text-xs text-brand-danger text-center">{error}</span>}
                 </div>
@@ -223,7 +246,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <img src={avatarSrc} alt={user.name} className="w-full h-full rounded-full object-cover border-4 border-transparent group-hover:border-brand-primary transition-all duration-300 shadow-xl group-hover:scale-105 bg-slate-700" loading="lazy" />
                   </div>
                   <span className="text-xl font-bold text-slate-300 group-hover:text-white transition-colors">{user.name}</span>
-                  {user.streak > 0 && <span className="absolute bottom-4 bg-brand-accent text-brand-dark text-xs font-bold px-2 py-1 rounded-full shadow-lg scale-90 group-hover:scale-100 transition-transform flex items-center gap-1">🔥 {user.streak} dias</span>}
+                  {user.streak > 0 && <span className="absolute bottom-4 bg-brand-accent text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg scale-90 group-hover:scale-100 transition-transform flex items-center gap-1">🔥 {user.streak} dias</span>}
                 </button>
                );
             })}

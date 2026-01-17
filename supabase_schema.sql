@@ -18,8 +18,18 @@ create table if not exists public.check_ins (
     timestamp text not null,
     photo text,
     caption text,
-    likes jsonb default '[]'::jsonb
+    likes jsonb default '[]'::jsonb,
+    videos jsonb default '[]'::jsonb
 );
+
+-- Migração segura: Adiciona coluna videos se não existir
+do $$
+begin
+    if not exists (select 1 from information_schema.columns where table_name = 'check_ins' and column_name = 'videos') then
+        alter table public.check_ins add column videos jsonb default '[]'::jsonb;
+    end if;
+end
+$$;
 
 create table if not exists public.comments (
     id text primary key,
@@ -40,13 +50,12 @@ create table if not exists public.notifications (
 );
 
 -- 2. SEGURANÇA: Habilitar RLS (Row Level Security)
--- Isso garante que nenhuma operação aconteça sem uma política explícita.
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.check_ins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
--- 3. Limpeza de políticas antigas (para evitar duplicação ao rodar o script novamente)
+-- 3. Limpeza de políticas antigas
 drop policy if exists "Public users read" on public.users;
 drop policy if exists "Public users insert" on public.users;
 drop policy if exists "Public users update" on public.users;
@@ -60,35 +69,24 @@ drop policy if exists "Public notifications insert" on public.notifications;
 drop policy if exists "Public notifications delete" on public.notifications;
 
 -- 4. DEFINIÇÃO DE POLÍTICAS (Policies)
--- Como estamos usando uma autenticação customizada no frontend e não o Supabase Auth,
--- precisamos permitir acesso à role 'anon' (API Key pública), mas controlando os tipos de operações.
-
--- TABELA USERS
--- Permitir leitura pública (Ranking/Feed)
 create policy "Public users read" on public.users for select using (true);
--- Permitir criação de usuários (Login inicial)
 create policy "Public users insert" on public.users for insert with check (true);
--- Permitir atualização (Scores, Streak, Avatar, Password)
 create policy "Public users update" on public.users for update using (true);
--- NOTA: NÃO criamos política de DELETE. Ninguém pode apagar usuários via API.
 
--- TABELA CHECK_INS
 create policy "Public checkins read" on public.check_ins for select using (true);
 create policy "Public checkins insert" on public.check_ins for insert with check (true);
-create policy "Public checkins update" on public.check_ins for update using (true); -- Para Likes
--- NOTA: NÃO criamos política de DELETE. Ninguém pode apagar check-ins.
+create policy "Public checkins update" on public.check_ins for update using (true);
+-- Permite delete público (controlado pelo app via lógica de negócio, mas aberto no banco para permitir a função do admin)
+create policy "Public checkins delete" on public.check_ins for delete using (true);
 
--- TABELA COMMENTS
 create policy "Public comments read" on public.comments for select using (true);
 create policy "Public comments insert" on public.comments for insert with check (true);
 
--- TABELA NOTIFICATIONS
 create policy "Public notifications read" on public.notifications for select using (true);
 create policy "Public notifications insert" on public.notifications for insert with check (true);
--- Permitir deletar APENAS notificações (necessário para a função 'Limpar Notificações' do app)
 create policy "Public notifications delete" on public.notifications for delete using (true);
 
--- 5. Seed Inicial (Garante que as usuárias existam)
+-- 5. Seed Inicial (se necessário)
 insert into public.users (id, name, avatar_seed, score, streak)
 values 
 ('1', 'Aline', 501, 0, 0),

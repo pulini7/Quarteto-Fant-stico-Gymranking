@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
-import { getAllCheckIns, toggleCheckInLike, addComment, deleteCheckIn } from '../services/storageService';
+import { getAllCheckIns, toggleCheckInLike, addComment, deleteCheckIn, addVideoToCheckIn } from '../services/storageService';
 import { User, CheckIn } from '../types';
 import { playSound } from '../services/soundService';
 
@@ -50,6 +50,7 @@ const ImageLightbox: React.FC<{ src: string; onClose: () => void }> = ({ src, on
 };
 
 // --- LOGIC COMPONENTS ---
+const SUPER_ADMIN_EMAIL = 'vitor_pulini@hotmail.com';
 
 const FeedPost = memo(({ 
     checkIn, 
@@ -58,7 +59,8 @@ const FeedPost = memo(({
     onLike, 
     onPostComment,
     onDelete,
-    onImageClick
+    onImageClick,
+    onVideoUpload
 }: { 
     checkIn: CheckIn, 
     user: User, 
@@ -66,7 +68,8 @@ const FeedPost = memo(({
     onLike: (id: string) => void, 
     onPostComment: (id: string, text: string) => void,
     onDelete: (id: string) => void,
-    onImageClick: (src: string) => void
+    onImageClick: (src: string) => void,
+    onVideoUpload: (id: string, file: File) => void
 }) => {
     const [commentText, setCommentText] = useState('');
     const [isCommentsOpen, setIsCommentsOpen] = useState(false);
@@ -78,8 +81,11 @@ const FeedPost = memo(({
 
     const likes = checkIn.likes || [];
     const comments = checkIn.comments || [];
+    const videos = checkIn.videos || [];
+    
     const isLiked = likes.includes(currentUser.id);
-    const isOwnerOrAdmin = currentUser.id === user.id || currentUser.isAdmin;
+    const isOwner = currentUser.id === user.id;
+    const canDelete = isOwner || currentUser.name === SUPER_ADMIN_EMAIL || currentUser.isAdmin;
 
     const formatTime = (isoString: string) => {
         const date = new Date(isoString);
@@ -141,8 +147,6 @@ const FeedPost = memo(({
             setTimeout(() => setShowHeartAnimation(false), 1000);
             playSound.success(); // Satisfying pop sound
         } else {
-            // Single Tap (Wait briefly to confirm it's not a double tap before zooming? No, instant zoom is better UX, double tap overrides)
-            // We'll just open zoom immediately. If they double tap, the animation shows on top.
             onImageClick(checkIn.photo);
         }
         lastClickRef.current = now;
@@ -153,6 +157,17 @@ const FeedPost = memo(({
             onDelete(checkIn.id);
         }
     };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            if (file.size > 20 * 1024 * 1024) { // 20MB limit hard check
+                alert("O vídeo é muito grande! Tente um vídeo menor (Max 20MB).");
+                return;
+            }
+            onVideoUpload(checkIn.id, file);
+        }
+    }
     
     return (
         <div className="bg-brand-card rounded-3xl border border-slate-700 overflow-hidden shadow-xl mb-8 relative">
@@ -171,24 +186,55 @@ const FeedPost = memo(({
                         <p className="text-[10px] text-slate-400 font-medium">{formatTime(checkIn.timestamp)} • Treino</p>
                     </div>
                 </div>
-                {isOwnerOrAdmin && (
-                    <button onClick={handleDelete} className="text-slate-500 hover:text-red-500 p-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                    </button>
-                )}
+                <div className="flex items-center gap-2">
+                    {/* Botão de Adicionar Vídeo (Só para o Dono) */}
+                    {isOwner && (
+                        <label className="text-slate-500 hover:text-brand-accent p-2 cursor-pointer transition-colors" title="Gravar Vídeo">
+                            <input 
+                                type="file" 
+                                accept="video/*" 
+                                capture="environment" 
+                                className="hidden" 
+                                onChange={handleFileSelect}
+                            />
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/><path d="M12 12h.01"/></svg>
+                        </label>
+                    )}
+
+                    {/* Botão de Deletar (Dono ou Super Admin) */}
+                    {canDelete && (
+                        <button onClick={handleDelete} className="text-slate-500 hover:text-red-500 p-2 transition-colors" title="Apagar Post">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    )}
+                </div>
             </div>
             
-            <div className="w-full bg-black aspect-square md:aspect-video relative group cursor-pointer" onClick={handleImageClick}>
-                {checkIn.photo ? (
-                    <img src={checkIn.photo} alt="Workout" className="w-full h-full object-contain" loading="lazy" />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-500 text-xs">Sem foto</div>
-                )}
-                
-                {/* Big Heart Animation Overlay */}
-                {showHeartAnimation && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 animate-ping-short">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="white" stroke="none" className="drop-shadow-2xl opacity-90"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            <div className="w-full bg-black relative group">
+                {/* Main Photo */}
+                <div className="aspect-square md:aspect-video relative cursor-pointer" onClick={handleImageClick}>
+                    {checkIn.photo ? (
+                        <img src={checkIn.photo} alt="Workout" className="w-full h-full object-contain" loading="lazy" />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-500 text-xs">Sem foto</div>
+                    )}
+                    
+                    {/* Big Heart Animation Overlay */}
+                    {showHeartAnimation && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 animate-ping-short">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="white" stroke="none" className="drop-shadow-2xl opacity-90"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        </div>
+                    )}
+                </div>
+
+                {/* Video Carousel/Grid if videos exist */}
+                {videos.length > 0 && (
+                    <div className="flex overflow-x-auto gap-2 p-2 bg-slate-900 scrollbar-thin scrollbar-thumb-brand-primary">
+                        {videos.map((vid, idx) => (
+                            <div key={idx} className="min-w-[150px] w-[150px] aspect-[9/16] bg-black rounded-lg overflow-hidden border border-slate-700 relative shadow-md">
+                                <video src={vid} controls className="w-full h-full object-cover" />
+                            </div>
+                        ))}
                     </div>
                 )}
             </div>
@@ -281,6 +327,7 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [isPulling, setIsPulling] = useState(false);
+  const [uploadingVideoId, setUploadingVideoId] = useState<string | null>(null);
   
   // Infinite Scroll State
   const [page, setPage] = useState(0);
@@ -354,9 +401,7 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
 
   const handleLike = useCallback(async (checkInId: string) => {
     await toggleCheckInLike(checkInId, currentUser.id);
-    // Optimistic update logic could go here, but for now we just rely on next fetch or parent re-render? 
-    // Actually, FeedPost manages its own "isLiked" derived from props. 
-    // Ideally we update local state too:
+    // Optimistic update
     setFeedData(prev => prev.map(item => {
         if (item.checkIn.id === checkInId) {
             const likes = item.checkIn.likes || [];
@@ -387,6 +432,31 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
       setFeedData(prev => prev.filter(item => item.checkIn.id !== checkInId));
   }, []);
 
+  const handleVideoUpload = useCallback(async (checkInId: string, file: File) => {
+      setUploadingVideoId(checkInId);
+      playSound.click();
+      
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+          const base64 = reader.result as string;
+          const success = await addVideoToCheckIn(checkInId, base64);
+          if (success) {
+              playSound.success();
+              setFeedData(prev => prev.map(item => {
+                  if (item.checkIn.id === checkInId) {
+                      const existingVideos = item.checkIn.videos || [];
+                      return { ...item, checkIn: { ...item.checkIn, videos: [...existingVideos, base64] } };
+                  }
+                  return item;
+              }));
+          } else {
+              alert("Erro ao salvar vídeo. Tente novamente ou use um arquivo menor.");
+          }
+          setUploadingVideoId(null);
+      };
+      reader.readAsDataURL(file);
+  }, []);
+
   return (
     <div 
         ref={feedContainerRef}
@@ -413,6 +483,13 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
              Solte para atualizar
           </div>
       </div>
+
+      {uploadingVideoId && (
+        <div className="fixed top-0 left-0 right-0 z-[100] h-1 bg-slate-800">
+            <div className="h-full bg-brand-accent animate-pulse w-full"></div>
+            <div className="absolute top-2 left-0 right-0 text-center text-xs font-bold text-brand-accent bg-black/50 py-1">Enviando vídeo...</div>
+        </div>
+      )}
 
       <div className="text-center mb-6 pt-2">
         <h2 className="text-2xl font-black italic tracking-tighter text-white">FEED DA GALERA</h2>
@@ -450,6 +527,7 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
                         onPostComment={handlePostComment}
                         onDelete={handleDeletePost}
                         onImageClick={setActiveImage}
+                        onVideoUpload={handleVideoUpload}
                     />
                 </div>
             );

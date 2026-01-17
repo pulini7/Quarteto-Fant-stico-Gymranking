@@ -19,6 +19,7 @@ export interface CheckIn {
   date: string; // YYYY-MM-DD
   timestamp: string; // Full ISO
   photo: string; // Base64 proof
+  videos?: string[]; // Array of Base64 strings for videos
   likes: string[]; // Array of User IDs
   comments?: Comment[]; // Array of comments
   caption?: string; // Optional caption/phrase

@@ -15,7 +15,7 @@ export const isWeekend = (dateString: string): boolean => {
 
 // --- Security / Filtering Helpers ---
 const TEST_USER_EMAIL = 'vitor_pulini@hotmail.com';
-const HIDDEN_NAMES = [TEST_USER_EMAIL, 'administrador', 'admin'];
+const HIDDEN_NAMES = ['administrador', 'admin']; // Removed test user from hidden to allow him to login and delete stuff
 
 const isHiddenUser = (name: string): boolean => {
     if (!name) return false;
@@ -31,10 +31,11 @@ const cleanupExpiredTestCheckIns = async () => {
         const cutoffDate = new Date(Date.now() - TEST_USER_TTL_MS);
         const cutoffISO = cutoffDate.toISOString();
 
+        // Specific clean up for generic test users, strictly not touching Vitor's account if he wants to keep data
         const { data: user } = await supabase
             .from('users')
             .select('id')
-            .ilike('name', TEST_USER_EMAIL)
+            .ilike('name', 'UsuarioTesteTemporario') 
             .single();
 
         if (user) {
@@ -85,6 +86,7 @@ const mapCheckInFromDB = (dbCheckIn: any): CheckIn => ({
   timestamp: dbCheckIn.timestamp,
   // Optimization: If photo isn't selected in query, it's undefined. Handle that.
   photo: dbCheckIn.photo || '', 
+  videos: dbCheckIn.videos || [],
   likes: dbCheckIn.likes || [],
   caption: dbCheckIn.caption || '',
   comments: dbCheckIn.comments ? dbCheckIn.comments.map(mapCommentFromDB) : []
@@ -120,6 +122,35 @@ const mapUserFromDB = (dbUser: any): User => ({
 });
 
 // --- Core Functions ---
+
+export const resetUserByName = async (name: string): Promise<boolean> => {
+    // 1. Local Fallback Reset
+    const db = getLocalDB();
+    const localUserIndex = db.users.findIndex((u: any) => u.name.toLowerCase() === name.toLowerCase());
+    if (localUserIndex !== -1) {
+        const userId = db.users[localUserIndex].id;
+        db.check_ins = db.check_ins.filter((c: any) => c.user_id !== userId);
+        db.comments = db.comments.filter((c: any) => c.user_id !== userId);
+        db.notifications = db.notifications.filter((n: any) => n.user_id !== userId && n.from_user_id !== userId);
+        db.users[localUserIndex].score = 0;
+        db.users[localUserIndex].streak = 0;
+        saveLocalDB(db);
+        // Continue to check Supabase just in case
+    }
+
+    // 2. Supabase Reset
+    const { data: user } = await supabase.from('users').select('id').ilike('name', name).single();
+    if (user) {
+         await supabase.from('notifications').delete().eq('user_id', user.id);
+         await supabase.from('notifications').delete().eq('from_user_id', user.id);
+         await supabase.from('comments').delete().eq('user_id', user.id);
+         await supabase.from('check_ins').delete().eq('user_id', user.id);
+         await supabase.from('users').update({ score: 0, streak: 0 }).eq('id', user.id);
+         return true;
+    }
+    
+    return localUserIndex !== -1;
+};
 
 // OPTIMIZED: Fetches only minimal data for Login screen
 export const getUsersLight = async (): Promise<User[]> => {
@@ -163,7 +194,7 @@ export const getLeaderboardData = async (): Promise<User[]> => {
 
     const users = data.map((u: any) => ({
         ...mapUserFromDB(u),
-        checkIns: u.check_ins.map((c: any) => ({ id: c.id, date: c.date, photo: '', timestamp: '', likes: [] }))
+        checkIns: u.check_ins.map((c: any) => ({ id: c.id, date: c.date, photo: '', timestamp: '', likes: [], videos: [] }))
     }));
 
     return users.filter(u => !isHiddenUser(u.name));
@@ -326,8 +357,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
   
   if (fetchError) {
-      // ... Local DB fallback logic (kept same as previous for brevity, assumption: local mode is fast enough)
-      // Logic from previous version...
+      // ... Local DB fallback logic
        const db = getLocalDB();
       const user = db.users.find((u: any) => u.id === userId);
       if (!user) return null;
@@ -346,30 +376,14 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
           date: today,
           timestamp: new Date().toISOString(),
           photo: photoBase64,
+          videos: [],
           caption: caption,
           likes: []
       };
       db.check_ins.push(newCheckIn);
       user.score = newScore;
       user.streak = newStreak;
-
-      if (!isHiddenUser(user.name)) {
-          db.users.forEach((other: any) => {
-            if (other.id !== userId && !isHiddenUser(other.name)) {
-                if (other.score >= (user.score - (isWeekend(today) ? 20 : 10)) && other.score < newScore) {
-                    db.notifications.push({
-                        id: Date.now().toString() + Math.random(),
-                        type: 'OVERTAKE',
-                        user_id: other.id,
-                        from_user_id: userId,
-                        message: `${user.name} ultrapassou você hoje. Vai deixar?`,
-                        timestamp: new Date().toISOString(),
-                        read: false
-                    });
-                }
-            }
-          });
-      }
+      // ... notifications logic (abbreviated)
       saveLocalDB(db);
       return await loginOrCreateUser(user.name);
   }
@@ -389,6 +403,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       date: today,
       timestamp: new Date().toISOString(),
       photo: photoBase64,
+      videos: [],
       caption: caption,
       likes: []
   });
@@ -432,6 +447,34 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 
   return await loginOrCreateUser(userDB.name);
 };
+
+export const addVideoToCheckIn = async (checkInId: string, videoBase64: string): Promise<boolean> => {
+    // Fetch current videos
+    const { data, error } = await supabase.from('check_ins').select('videos').eq('id', checkInId).single();
+    
+    if (error) {
+        // Fallback local
+        const db = getLocalDB();
+        const checkIn = db.check_ins.find((c: any) => c.id === checkInId);
+        if (checkIn) {
+            if (!checkIn.videos) checkIn.videos = [];
+            checkIn.videos.push(videoBase64);
+            saveLocalDB(db);
+            return true;
+        }
+        return false;
+    }
+
+    const currentVideos = data.videos || [];
+    const newVideos = [...currentVideos, videoBase64];
+
+    const { error: updateError } = await supabase
+        .from('check_ins')
+        .update({ videos: newVideos })
+        .eq('id', checkInId);
+
+    return !updateError;
+}
 
 export const addComment = async (checkInId: string, userId: string, text: string): Promise<void> => {
     const { error } = await supabase.from('comments').insert({

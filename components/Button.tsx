@@ -15,9 +15,9 @@ export const Button: React.FC<ButtonProps> = ({
   const baseStyles = "px-4 py-3 rounded-xl font-bold transition-all duration-200 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
   
   const variants = {
-    primary: "bg-brand-primary text-white hover:bg-blue-600 shadow-blue-900/20",
+    primary: "bg-brand-primary text-white hover:bg-pink-600 shadow-pink-900/20",
     secondary: "bg-brand-card text-gray-300 hover:bg-slate-700 border border-slate-600",
-    accent: "bg-brand-accent text-brand-dark hover:bg-emerald-400 shadow-emerald-900/20",
+    accent: "bg-brand-accent text-white hover:bg-fuchsia-400 shadow-fuchsia-900/20",
     danger: "bg-brand-danger text-white hover:bg-red-600"
   };
 

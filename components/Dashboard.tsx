@@ -274,7 +274,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
                 {/* RPG Progress Bar */}
                 <div className="relative w-full h-4 bg-slate-800 rounded-full border border-slate-600 overflow-hidden shadow-inner">
                     <div 
-                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 via-brand-primary to-brand-accent transition-all duration-1000 ease-out"
+                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-pink-500 via-brand-primary to-brand-accent transition-all duration-1000 ease-out"
                         style={{ width: `${progressPercent}%` }}
                     >
                         <div className="w-full h-full animate-pulse opacity-50 bg-white/20"></div>
@@ -327,7 +327,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
                     <div 
                         key={day} 
                         className={`aspect-square rounded-md flex items-center justify-center text-[10px] font-bold transition-all
-                            ${checked ? 'bg-brand-accent text-brand-dark shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-slate-700/50 text-slate-600'}
+                            ${checked ? 'bg-brand-accent text-white shadow-[0_0_8px_rgba(236,72,153,0.4)]' : 'bg-slate-700/50 text-slate-600'}
                             ${isToday && !checked ? 'border border-slate-500 text-slate-300' : ''}
                         `}
                     >

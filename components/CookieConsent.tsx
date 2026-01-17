@@ -30,7 +30,7 @@ export const CookieConsent: React.FC = () => {
       </div>
       <button 
         onClick={handleAccept}
-        className="bg-brand-primary hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-lg shadow-blue-900/20 whitespace-nowrap w-full md:w-auto text-sm"
+        className="bg-brand-primary hover:bg-pink-600 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-lg shadow-pink-900/20 whitespace-nowrap w-full md:w-auto text-sm"
       >
         Entendi e Aceito
       </button>
