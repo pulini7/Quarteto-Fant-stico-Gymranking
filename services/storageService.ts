@@ -15,7 +15,6 @@ export const isWeekend = (dateString: string): boolean => {
 
 // --- Security / Filtering Helpers ---
 const TEST_USER_EMAIL = 'vitor_pulini@hotmail.com';
-// Atualizado: Vitor incluído nos nomes ocultos para ser invisível nas listas (Feed, Ranking, Login Grid)
 const HIDDEN_NAMES = ['administrador', 'admin', 'vitor_pulini@hotmail.com']; 
 
 const isHiddenUser = (name: string): boolean => {
@@ -27,24 +26,12 @@ const isHiddenUser = (name: string): boolean => {
 const TEST_USER_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 const cleanupExpiredTestCheckIns = async () => {
-    // Fire and forget - don't block the UI
     try {
         const cutoffDate = new Date(Date.now() - TEST_USER_TTL_MS);
         const cutoffISO = cutoffDate.toISOString();
-
-        // Specific clean up for generic test users, strictly not touching Vitor's account if he wants to keep data
-        const { data: user } = await supabase
-            .from('users')
-            .select('id')
-            .ilike('name', 'UsuarioTesteTemporario') 
-            .single();
-
+        const { data: user } = await supabase.from('users').select('id').ilike('name', 'UsuarioTesteTemporario').single();
         if (user) {
-            await supabase
-                .from('check_ins')
-                .delete()
-                .eq('user_id', user.id)
-                .lt('timestamp', cutoffISO);
+            await supabase.from('check_ins').delete().eq('user_id', user.id).lt('timestamp', cutoffISO);
         }
     } catch (e) {
         console.warn("Cleanup error (background):", e);
@@ -59,7 +46,6 @@ const getLocalDB = () => {
     const stored = localStorage.getItem(LOCAL_DB_KEY);
     if (stored) return JSON.parse(stored);
     
-    // Initial Seed for Local Mode
     const initial = {
         users: [
              { id: '1', name: 'Aline', avatar_seed: 501, score: 0, streak: 0, custom_avatar: null, password: null },
@@ -85,7 +71,6 @@ const mapCheckInFromDB = (dbCheckIn: any): CheckIn => ({
   id: dbCheckIn.id,
   date: dbCheckIn.date,
   timestamp: dbCheckIn.timestamp,
-  // Optimization: If photo isn't selected in query, it's undefined. Handle that.
   photo: dbCheckIn.photo || '', 
   videos: dbCheckIn.videos || [],
   likes: dbCheckIn.likes || [],
@@ -117,7 +102,6 @@ const mapUserFromDB = (dbUser: any): User => ({
   score: dbUser.score,
   streak: dbUser.streak,
   password: dbUser.password,
-  // Relations are handled based on what's passed
   checkIns: dbUser.check_ins ? dbUser.check_ins.map(mapCheckInFromDB) : [],
   notifications: dbUser.notifications ? dbUser.notifications.map(mapNotificationFromDB) : []
 });
@@ -125,7 +109,6 @@ const mapUserFromDB = (dbUser: any): User => ({
 // --- Core Functions ---
 
 export const resetUserByName = async (name: string): Promise<boolean> => {
-    // 1. Local Fallback Reset
     const db = getLocalDB();
     const localUserIndex = db.users.findIndex((u: any) => u.name.toLowerCase() === name.toLowerCase());
     if (localUserIndex !== -1) {
@@ -136,10 +119,8 @@ export const resetUserByName = async (name: string): Promise<boolean> => {
         db.users[localUserIndex].score = 0;
         db.users[localUserIndex].streak = 0;
         saveLocalDB(db);
-        // Continue to check Supabase just in case
     }
 
-    // 2. Supabase Reset
     const { data: user } = await supabase.from('users').select('id').ilike('name', name).single();
     if (user) {
          await supabase.from('notifications').delete().eq('user_id', user.id);
@@ -153,18 +134,15 @@ export const resetUserByName = async (name: string): Promise<boolean> => {
     return localUserIndex !== -1;
 };
 
-// OPTIMIZED: Fetches only minimal data for Login screen
 export const getUsersLight = async (): Promise<User[]> => {
     const { data, error } = await supabase
         .from('users')
-        .select('id, name, avatar_seed, custom_avatar, password, streak, score'); // No joins, very fast
+        .select('id, name, avatar_seed, custom_avatar, password, streak, score'); 
 
     if (error || !data) {
-        // Fallback to local full fetch if offline
         return getUsers();
     }
     
-    // Map manually since mapUserFromDB expects joins potentially
     const users: User[] = data.map((u: any) => ({
         id: u.id,
         name: u.name,
@@ -180,9 +158,7 @@ export const getUsersLight = async (): Promise<User[]> => {
     return users.filter(u => !isHiddenUser(u.name));
 }
 
-// OPTIMIZED: Fetches data for Leaderboard WITHOUT Base64 photos
 export const getLeaderboardData = async (): Promise<User[]> => {
-    // We only need the DATE of checkins to calculate weekly scores, NOT the photo.
     const { data, error } = await supabase
         .from('users')
         .select(`
@@ -191,7 +167,7 @@ export const getLeaderboardData = async (): Promise<User[]> => {
         `)
         .order('score', { ascending: false });
 
-    if (error) return getUsers(); // Fallback
+    if (error) return getUsers(); 
 
     const users = data.map((u: any) => ({
         ...mapUserFromDB(u),
@@ -201,7 +177,6 @@ export const getLeaderboardData = async (): Promise<User[]> => {
     return users.filter(u => !isHiddenUser(u.name));
 }
 
-// Heavy fetch (fallback only)
 export const getUsers = async (): Promise<User[]> => {
   const { data, error } = await supabase
     .from('users')
@@ -340,8 +315,6 @@ export const loginOrCreateUser = async (name: string): Promise<User> => {
 const processProvocations = async (userId: string, userName: string, oldScore: number, newScore: number) => {
     try {
         if (isHiddenUser(userName)) return;
-        
-        // Minimal fetch for performance
         const { data: allUsers } = await supabase.from('users').select('id, name, score');
         if (!allUsers) return;
         
@@ -370,7 +343,6 @@ const processProvocations = async (userId: string, userName: string, oldScore: n
 };
 
 export const performCheckIn = async (userId: string, photoBase64: string, caption: string = ''): Promise<User | null> => {
-  // OPTIMIZATION: Don't await cleanup
   cleanupExpiredTestCheckIns();
 
   const today = getTodayString();
@@ -378,21 +350,9 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toISOString().split('T')[0];
 
-  const calculateNewStats = (currentScore: number, currentStreak: number, hasCheckInYesterday: boolean) => {
-      let newStreak = 1;
-      if (hasCheckInYesterday) {
-          newStreak = currentStreak + 1;
-      }
-      const pointsEarned = isWeekend(today) ? 20 : 10;
-      const newScore = currentScore + pointsEarned;
-      return { newScore, newStreak };
-  };
-
-  const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
-  
-  // FALLBACK FUNCTION (Repeated logic for fallback)
+  // Logic to save local
   const saveToLocalFallback = async (fallbackUserId: string, fallbackPhoto: string, fallbackCaption: string) => {
-      console.log("Saving checkin to local storage fallback");
+      console.log("TIMEOUT or ERROR: Saving checkin to local storage fallback");
       const db = getLocalDB();
       const user = db.users.find((u: any) => u.id === fallbackUserId);
       if (!user) return null;
@@ -403,7 +363,10 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       }
 
       const hasYesterday = userCheckIns.some((c: any) => c.date === yesterdayStr);
-      const { newScore, newStreak } = calculateNewStats(user.score || 0, user.streak || 0, hasYesterday);
+      let newStreak = 1;
+      if (hasYesterday) newStreak = user.streak + 1;
+      const pointsEarned = isWeekend(today) ? 20 : 10;
+      const newScore = user.score + pointsEarned;
 
       const newCheckIn = {
           id: Date.now().toString(),
@@ -422,19 +385,35 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       return await loginOrCreateUser(user.name);
   };
 
+  // Helper calculation
+  const calculateNewStats = (currentScore: number, currentStreak: number, hasCheckInYesterday: boolean) => {
+      let newStreak = 1;
+      if (hasCheckInYesterday) {
+          newStreak = currentStreak + 1;
+      }
+      const pointsEarned = isWeekend(today) ? 20 : 10;
+      const newScore = currentScore + pointsEarned;
+      return { newScore, newStreak };
+  };
+
+  const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
+  
   if (fetchError || !userDB) {
       return await saveToLocalFallback(userId, photoBase64, caption);
   }
 
-  // SUPABASE SUCCESS FLOW START
+  // Check valid stats
   const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
   if (hasCheckInToday) return await loginOrCreateUser(userDB.name);
-
+  
   const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
   const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
 
-  // Try INSERT into Supabase
-  const { error: checkInError } = await supabase.from('check_ins').insert({
+  // --- CRITICAL FIX: TIMEOUT RACE CONDITION ---
+  // Create a race between Supabase insert and a 5 second timer.
+  // If Supabase hangs (bad network/large payload), the timer wins and throws an error, triggering fallback.
+  
+  const insertPromise = supabase.from('check_ins').insert({
       id: Date.now().toString(),
       user_id: userId,
       date: today,
@@ -445,30 +424,36 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       likes: []
   });
 
-  // CRITICAL FAIL-SAFE: If Supabase fails (e.g. payload too large), Fallback to Local Storage
-  if (checkInError) {
-      console.error("Supabase CheckIn Failed (Fallback to Local):", checkInError);
+  const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Supabase Timeout')), 5000);
+  });
+
+  try {
+      const result: any = await Promise.race([insertPromise, timeoutPromise]);
+      
+      if (result.error) throw result.error;
+
+      // Update User Stats
+      await supabase.from('users').update({
+          score: newScore,
+          streak: newStreak
+      }).eq('id', userId);
+
+      // Fire and forget provocation
+      processProvocations(userId, userDB.name, userDB.score || 0, newScore);
+      
+      return await loginOrCreateUser(userDB.name);
+
+  } catch (err) {
+      // Catch Timeout or Supabase Error
+      console.warn("Check-in failed due to timeout or error, switching to Local Mode.", err);
       return await saveToLocalFallback(userId, photoBase64, caption);
   }
-
-  // Update user stats in Supabase
-  await supabase.from('users').update({
-      score: newScore,
-      streak: newStreak
-  }).eq('id', userId);
-
-  // OPTIMIZATION: Run provocation logic in background (fire-and-forget) to avoid blocking UI return
-  processProvocations(userId, userDB.name, userDB.score || 0, newScore);
-
-  return await loginOrCreateUser(userDB.name);
 };
 
 export const addVideoToCheckIn = async (checkInId: string, videoBase64: string): Promise<boolean> => {
-    // Fetch current videos
     const { data, error } = await supabase.from('check_ins').select('videos').eq('id', checkInId).single();
-    
     if (error) {
-        // Fallback local
         const db = getLocalDB();
         const checkIn = db.check_ins.find((c: any) => c.id === checkInId);
         if (checkIn) {
@@ -479,15 +464,9 @@ export const addVideoToCheckIn = async (checkInId: string, videoBase64: string):
         }
         return false;
     }
-
     const currentVideos = data.videos || [];
     const newVideos = [...currentVideos, videoBase64];
-
-    const { error: updateError } = await supabase
-        .from('check_ins')
-        .update({ videos: newVideos })
-        .eq('id', checkInId);
-
+    const { error: updateError } = await supabase.from('check_ins').update({ videos: newVideos }).eq('id', checkInId);
     return !updateError;
 }
 
@@ -499,7 +478,6 @@ export const addComment = async (checkInId: string, userId: string, text: string
         text: text,
         timestamp: new Date().toISOString()
     });
-
     if (error) {
         const db = getLocalDB();
         db.comments.push({
@@ -514,14 +492,9 @@ export const addComment = async (checkInId: string, userId: string, text: string
 }
 
 export const deleteCheckIn = async (checkInId: string): Promise<void> => {
-    // Delete comments first (if cascade isn't set, but standard SQL practice)
     await supabase.from('comments').delete().eq('check_in_id', checkInId);
-    
-    // Delete checkin
     const { error } = await supabase.from('check_ins').delete().eq('id', checkInId);
-
     if (error) {
-        // Local Fallback
         const db = getLocalDB();
         db.check_ins = db.check_ins.filter((c: any) => c.id !== checkInId);
         db.comments = db.comments.filter((c: any) => c.check_in_id !== checkInId);
@@ -531,7 +504,6 @@ export const deleteCheckIn = async (checkInId: string): Promise<void> => {
 
 export const clearNotifications = async (userId: string): Promise<User | null> => {
     const { error } = await supabase.from('notifications').delete().eq('user_id', userId);
-    
     if (error) {
         const db = getLocalDB();
         db.notifications = db.notifications.filter((n: any) => n.user_id !== userId);
@@ -542,7 +514,6 @@ export const clearNotifications = async (userId: string): Promise<User | null> =
 }
 
 export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
-    // Fire and forget cleanup
     cleanupExpiredTestCheckIns();
 
     const { data: allUsersRaw } = await supabase.from('users').select('id, name');
@@ -554,21 +525,15 @@ export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
     const from = page * limit;
     const to = from + limit - 1;
 
-    // OPTIMIZATION: Pagination with range
     const { data: checkIns, error } = await supabase
         .from('check_ins')
-        .select(`
-            *,
-            comments (*),
-            users (id, name, avatar_seed, custom_avatar)
-        `)
+        .select(`*, comments (*), users (id, name, avatar_seed, custom_avatar)`)
         .order('timestamp', { ascending: false })
         .range(from, to);
     
     let result = [];
 
     if (error) {
-        // Fallback Local with manual pagination
         const db = getLocalDB();
         const localHiddenIds = db.users.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id);
         const combined = db.check_ins.map((c: any) => {
@@ -577,7 +542,6 @@ export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
             return { ...c, comments: comments, users: u };
         }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-        // Slice for pagination
         const paginatedCombined = combined.slice(from, from + limit);
 
         result = paginatedCombined.map((row: any) => ({

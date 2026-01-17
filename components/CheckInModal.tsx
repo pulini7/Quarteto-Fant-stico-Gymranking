@@ -79,9 +79,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       
       if (video.readyState !== 4) return; // Wait for video to be ready
 
-      // EXTREME OPTIMIZATION: 320px width max.
-      // Isso cria uma imagem de ~15kb. Impossível falhar o upload.
-      const MAX_WIDTH = 320;
+      // EXTREME OPTIMIZATION: 300px width max.
+      // Isso cria uma imagem de ~10-15kb. Impossível falhar o upload.
+      const MAX_WIDTH = 300;
       const scale = video.videoWidth > MAX_WIDTH ? MAX_WIDTH / video.videoWidth : 1;
       
       canvas.width = video.videoWidth * scale;
@@ -97,8 +97,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Compressão JPEG 0.4 (Qualidade baixa, mas suficiente para comprovação)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+        // Compressão JPEG 0.3 (Qualidade baixa, mas suficiente para comprovação)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
         
         setPreview(dataUrl);
         stopCamera();
