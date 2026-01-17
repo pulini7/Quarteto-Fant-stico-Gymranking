@@ -1,0 +1,69 @@
+import React, { useState, useEffect } from 'react';
+import { User, Tab } from './types';
+import { Login } from './components/Login';
+import { Dashboard } from './components/Dashboard';
+import { Leaderboard } from './components/Leaderboard';
+import { CoachAI } from './components/CoachAI';
+import { Feed } from './components/Feed';
+import { Navbar } from './components/Navbar';
+import { getUsers } from './services/storageService';
+
+const App: React.FC = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
+  
+  // Try to restore session from last active user (Mocking session)
+  useEffect(() => {
+    // In a real app we'd use a session token. 
+    // Here we just initialize mock data if empty.
+    getUsers(); 
+  }, []);
+
+  const handleUpdateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+  };
+
+  if (!user) {
+    return <Login onLogin={setUser} />;
+  }
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case Tab.DASHBOARD:
+        return <Dashboard user={user} onUpdateUser={handleUpdateUser} />;
+      case Tab.FEED:
+        return <Feed currentUser={user} />;
+      case Tab.LEADERBOARD:
+        return <Leaderboard />;
+      case Tab.COACH:
+        return <CoachAI user={user} />;
+      default:
+        return <Dashboard user={user} onUpdateUser={handleUpdateUser} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-brand-dark text-slate-100 flex flex-col font-sans">
+      <div className="flex-1 p-6 pb-24 max-w-lg mx-auto w-full">
+        {/* Header Small */}
+        <div className="flex justify-between items-center mb-6">
+            <h1 className="text-lg font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-brand-primary to-brand-accent leading-none">
+                QUARTETO FANTÁSTICO<br/>GYMRANKING
+            </h1>
+            <button 
+                onClick={() => setUser(null)} 
+                className="text-xs text-slate-500 hover:text-white transition-colors"
+            >
+                Sair
+            </button>
+        </div>
+
+        {renderContent()}
+      </div>
+      
+      <Navbar activeTab={activeTab} onSwitch={setActiveTab} />
+    </div>
+  );
+};
+
+export default App;

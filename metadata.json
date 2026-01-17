@@ -1,0 +1,7 @@
+{
+  "name": "Quarteto Fantástico Gymranking",
+  "description": "Um aplicativo de gamificação fitness que rastreia a frequência na academia, gera rankings competitivos e fornece motivação personalizada via Gemini AI.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
