@@ -6,6 +6,7 @@ import { Leaderboard } from './components/Leaderboard';
 import { CoachAI } from './components/CoachAI';
 import { Feed } from './components/Feed';
 import { Navbar } from './components/Navbar';
+import { CookieConsent } from './components/CookieConsent';
 import { getUsers, loginOrCreateUser } from './services/storageService';
 
 const App: React.FC = () => {
@@ -44,7 +45,12 @@ const App: React.FC = () => {
   };
 
   if (!user) {
-    return <Login onLogin={setUser} />;
+    return (
+        <>
+            <Login onLogin={setUser} />
+            <CookieConsent />
+        </>
+    );
   }
 
   const renderContent = () => {
@@ -82,6 +88,7 @@ const App: React.FC = () => {
       </div>
       
       <Navbar activeTab={activeTab} onSwitch={setActiveTab} />
+      <CookieConsent />
     </div>
   );
 };

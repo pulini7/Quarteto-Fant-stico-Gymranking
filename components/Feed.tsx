@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getAllCheckIns, toggleCheckInLike, addComment, getUsers } from '../services/storageService';
+import { getAllCheckIns, toggleCheckInLike, addComment, getUsersLight } from '../services/storageService';
 import { User, CheckIn } from '../types';
 
 interface FeedProps {
@@ -20,11 +20,10 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
-        // getAllCheckIns already filters out posts, likes, and comments from hidden users
-        // getUsers also filters out hidden users from the list
+        // Optimization: Use getUsersLight for author lookup (names/avatars) instead of heavy getUsers
         const [checkIns, users] = await Promise.all([
             getAllCheckIns(),
-            getUsers()
+            getUsersLight()
         ]);
 
         setFeedData(checkIns);
@@ -127,6 +126,7 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
                             src={user.customAvatar || `https://picsum.photos/seed/${user.avatarSeed}/100`} 
                             className="w-10 h-10 rounded-full object-cover border border-slate-600"
                             alt={user.name}
+                            loading="lazy"
                         />
                         <div>
                             <h3 className="font-bold text-white text-sm">{user.name}</h3>
