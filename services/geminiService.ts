@@ -130,15 +130,15 @@ export const analyzeWorkoutImage = async (base64Image: string): Promise<string> 
                         }
                     },
                     {
-                        text: "Analise esta foto de academia. Descreva o exercício ou equipamento em 3 a 5 palavras. Depois sugira 3 hashtags curtas. Formato: 'Descrição. #Tag1 #Tag2 #Tag3'. Seja motivador e breve."
+                        text: "Descreva o treino em 3 palavras. Adicione 2 hashtags."
                     }
                 ]
             }
         });
 
-        return response.text || "Treino pesado! #Foco #Gym";
+        return response.text || "Treino pesado! #Foco";
     } catch (error) {
-        console.error("Gemini Vision Error:", error);
+        // Silently fail or log, don't break the user flow
         return "";
     }
 }

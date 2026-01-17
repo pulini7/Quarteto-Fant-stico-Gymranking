@@ -15,7 +15,8 @@ export const isWeekend = (dateString: string): boolean => {
 
 // --- Security / Filtering Helpers ---
 const TEST_USER_EMAIL = 'vitor_pulini@hotmail.com';
-const HIDDEN_NAMES = ['administrador', 'admin']; // Removed test user from hidden to allow him to login and delete stuff
+// Atualizado: Vitor incluído nos nomes ocultos para ser invisível nas listas (Feed, Ranking, Login Grid)
+const HIDDEN_NAMES = ['administrador', 'admin', 'vitor_pulini@hotmail.com']; 
 
 const isHiddenUser = (name: string): boolean => {
     if (!name) return false;

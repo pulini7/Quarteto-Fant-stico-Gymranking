@@ -20,6 +20,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,7 +42,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: facingMode,
-          width: { ideal: 1280 },
+          // Pede resolução menor para iniciar mais rápido
+          width: { ideal: 1280 }, 
           height: { ideal: 720 }
         } 
       });
@@ -69,9 +71,12 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const video = videoRef.current;
       const canvas = canvasRef.current;
       
-      // Define o tamanho do canvas igual ao do vídeo
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // OTIMIZAÇÃO CRÍTICA: Redimensionar imagem para evitar Payload Too Large no Supabase e lentidão na IA
+      const MAX_WIDTH = 800;
+      const scale = video.videoWidth > MAX_WIDTH ? MAX_WIDTH / video.videoWidth : 1;
+      
+      canvas.width = video.videoWidth * scale;
+      canvas.height = video.videoHeight * scale;
       
       const context = canvas.getContext('2d');
       if (context) {
@@ -82,19 +87,28 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         }
         
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        
+        // Compressão JPEG 0.6 para reduzir tamanho drasticamente (de 5MB para ~100KB)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        
         setPreview(dataUrl);
         stopCamera();
 
-        // Start AI Analysis
+        // Start AI Analysis em Background (Sem await para não bloquear a UI)
         setAnalyzing(true);
-        const suggestion = await analyzeWorkoutImage(dataUrl);
-        if (suggestion) {
-            // Se a IA sugerir algo, adicionamos, mas o usuário pode editar
-            setCaption(prev => prev ? `${prev} ${suggestion}` : suggestion);
-            playSound.success(); 
-        }
-        setAnalyzing(false);
+        analyzeWorkoutImage(dataUrl).then((suggestion) => {
+             if (suggestion) {
+                 // Só preenche se o usuário ainda não digitou nada ou se quiser complementar
+                 setCaption(prev => {
+                     if (prev.length > 5) return prev; // Se o usuário já escreveu, não sobrescreve
+                     return suggestion;
+                 });
+                 if (!isSubmitting) playSound.success(); 
+             }
+             setAnalyzing(false);
+        }).catch(() => {
+            setAnalyzing(false);
+        });
       }
     }
   };
@@ -122,7 +136,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   };
 
   const handleSubmit = () => {
-    if (preview) {
+    if (preview && !isSubmitting) {
+        setIsSubmitting(true);
         playSound.success();
         
         // Combina a legenda com as tags selecionadas
@@ -133,12 +148,13 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         }
 
         onConfirm(preview, finalCaption);
+        // Não resetamos isSubmitting aqui porque o modal vai fechar/desmontar
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
-      <div className="bg-brand-card w-full max-w-md rounded-3xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="bg-brand-card w-full max-w-md rounded-3xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
           <h3 className="text-lg font-bold text-white">Prova de Treino 📸</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
@@ -163,10 +179,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                     )}
                     
                     {/* Controles sobrepostos ao vídeo */}
-                    <div className="absolute bottom-4 left-0 right-0 flex justify-center items-center space-x-6">
+                    <div className="absolute bottom-6 left-0 right-0 flex justify-center items-center space-x-8">
                         <button 
                             onClick={toggleCamera} 
-                            className="p-3 bg-slate-800/50 backdrop-blur text-white rounded-full hover:bg-slate-700/80 transition-all active:scale-95"
+                            className="p-3 bg-slate-800/60 backdrop-blur text-white rounded-full hover:bg-slate-700/80 transition-all active:scale-95 border border-white/10"
                             title="Trocar Câmera"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0-4.418-3.582-8-8-8S4 5.582 4 10"/><path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8"/><path d="M10 2 8 4h4Z"/><path d="m14 22 2-2h-4Z"/></svg>
@@ -174,57 +190,61 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
 
                         <button 
                             onClick={takePhoto} 
-                            className="w-16 h-16 rounded-full border-4 border-white bg-transparent flex items-center justify-center hover:bg-white/20 transition-all active:scale-90"
+                            className="w-16 h-16 rounded-full border-4 border-white bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all active:scale-90 shadow-lg"
                         >
-                            <div className="w-12 h-12 bg-brand-primary rounded-full"></div>
+                            <div className="w-12 h-12 bg-brand-primary rounded-full shadow-inner"></div>
                         </button>
 
                          <div className="w-12"></div> {/* Spacer para balancear o layout */}
                     </div>
                 </div>
-                <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos agora.</p>
+                <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos.</p>
                 <canvas ref={canvasRef} hidden />
             </div>
           ) : (
             <div className="w-full space-y-4">
                 <div className="relative rounded-xl overflow-hidden border border-slate-600 shadow-lg bg-black">
                     <img src={preview} alt="Proof" className="w-full h-auto max-h-[25vh] object-contain mx-auto" />
-                    {analyzing && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                            <div className="bg-slate-900/90 px-3 py-1.5 rounded-full border border-brand-accent/50 flex items-center gap-2 animate-pulse">
-                                <span className="text-lg">🤖</span>
-                                <span className="text-brand-accent text-xs font-bold">IA Analisando...</span>
-                            </div>
-                        </div>
-                    )}
+                    
+                    {/* Botão de Refazer Foto Flutuante */}
+                    <button 
+                        onClick={retakePhoto}
+                        className="absolute top-2 left-2 bg-black/60 text-white p-1.5 rounded-full backdrop-blur-md"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                    </button>
                 </div>
                 
                 <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-300 flex justify-between">
-                        <span>Legenda</span>
-                        {analyzing ? <span className="text-xs text-brand-accent animate-pulse">Gerando tags...</span> : <span className="text-[10px] text-slate-500">Opcional</span>}
-                    </label>
+                    <div className="flex justify-between items-end">
+                         <label className="text-xs font-medium text-slate-300">Legenda</label>
+                         {analyzing && (
+                             <span className="text-[10px] text-brand-accent animate-pulse flex items-center gap-1">
+                                 ✨ IA Sugerindo...
+                             </span>
+                         )}
+                    </div>
                     <textarea 
                         value={caption}
                         onChange={(e) => setCaption(e.target.value)}
-                        placeholder="Aguarde a IA ou escreva..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:ring-2 focus:ring-brand-primary outline-none resize-none h-16 transition-all"
+                        placeholder="Escreva algo ou aguarde a IA..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:ring-2 focus:ring-brand-primary outline-none resize-none h-16 transition-all placeholder:text-slate-600"
                         maxLength={140}
                     />
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-2">
                     <label className="text-xs font-medium text-slate-300">O que você treinou hoje?</label>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-2">
                         {MUSCLE_GROUPS.map((tag) => {
                             const isSelected = selectedTags.includes(tag);
                             return (
                                 <button
                                     key={tag}
                                     onClick={() => toggleTag(tag)}
-                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all border ${
+                                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${
                                         isSelected 
-                                            ? 'bg-brand-primary text-white border-brand-primary shadow-lg shadow-blue-900/30 scale-105' 
+                                            ? 'bg-brand-primary text-white border-brand-primary shadow-lg shadow-pink-900/30 transform scale-105' 
                                             : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:text-white'
                                     }`}
                                 >
@@ -234,13 +254,6 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                         })}
                     </div>
                 </div>
-
-                <button 
-                    onClick={retakePhoto}
-                    className="text-xs text-slate-400 hover:text-white underline w-full text-center py-1"
-                >
-                    Tirar outra foto
-                </button>
             </div>
           )}
         </div>
@@ -250,10 +263,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             onClick={handleSubmit} 
             fullWidth 
             variant="accent" 
-            disabled={!preview || analyzing}
-            className="py-3 text-base shadow-xl"
+            disabled={!preview || isSubmitting}
+            className="py-3 text-base shadow-xl flex justify-center items-center gap-2"
           >
-            Confirmar Check-in
+            {isSubmitting ? 'Enviando...' : 'Confirmar Check-in'}
           </Button>
         </div>
       </div>
