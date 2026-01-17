@@ -12,13 +12,9 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   
-  // Try to restore session from last active user (Mocking session)
-  useEffect(() => {
-    // In a real app we'd use a session token. 
-    // Here we just initialize mock data if empty.
-    getUsers(); 
-  }, []);
-
+  // No real app, we would check for a session token here.
+  // For now, we start at login.
+  
   const handleUpdateUser = (updatedUser: User) => {
     setUser(updatedUser);
   };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User } from '../types';
-import { performCheckIn, getTodayString } from '../services/storageService';
+import { User, Notification } from '../types';
+import { performCheckIn, getTodayString, clearNotifications, saveUser } from '../services/storageService';
 import { Button } from './Button';
 import { Confetti } from './Confetti';
 import { AvatarModal } from './AvatarModal';
@@ -18,6 +18,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
   const [viewProofUrl, setViewProofUrl] = useState<string | null>(null);
   const [viewProofCaption, setViewProofCaption] = useState<string | undefined>(undefined);
+  const [rivalryNotification, setRivalryNotification] = useState<Notification | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const today = getTodayString();
   const todaysCheckIn = user.checkIns.find(c => c.date === today);
@@ -30,8 +32,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     setHasCheckedIn(!!todaysCheckIn);
   }, [user, todaysCheckIn]);
 
-  const handleCheckInComplete = (photoBase64: string, caption: string) => {
-    const updated = performCheckIn(user.id, photoBase64, caption);
+  // Check for provocations on mount
+  useEffect(() => {
+    if (user.notifications && user.notifications.length > 0) {
+        // Show the first one
+        setRivalryNotification(user.notifications[0]);
+    }
+  }, [user.notifications]);
+
+  const handleDismissRivalry = async () => {
+    setRivalryNotification(null);
+    const updatedUser = await clearNotifications(user.id);
+    if (updatedUser) {
+        onUpdateUser(updatedUser);
+    }
+  };
+
+  const handleCheckInComplete = async (photoBase64: string, caption: string) => {
+    setLoading(true);
+    const updated = await performCheckIn(user.id, photoBase64, caption);
+    setLoading(false);
+    
     if (updated) {
       onUpdateUser(updated);
       setHasCheckedIn(true);
@@ -41,10 +62,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     }
   };
 
-  const handleSaveAvatar = (newAvatarBase64: string) => {
+  const handleSaveAvatar = async (newAvatarBase64: string) => {
     const updatedUser = { ...user, customAvatar: newAvatarBase64 };
-    onUpdateUser(updatedUser);
-    import('../services/storageService').then(mod => mod.saveUser(updatedUser));
+    onUpdateUser(updatedUser); // Optimistic UI update
+    await saveUser(updatedUser);
     setIsAvatarModalOpen(false);
   };
 
@@ -76,6 +97,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     <div className="space-y-6 animate-fade-in">
       {showConfetti && <Confetti />}
       
+      {/* RIVALRY ALERT MODAL */}
+      {rivalryNotification && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-red-900/80 backdrop-blur-md animate-bounce-in">
+            <div className="bg-brand-card border-2 border-red-500 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center">
+                <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 animate-pulse"></div>
+                <div className="text-6xl mb-4">🚨</div>
+                <h3 className="text-2xl font-black text-white italic uppercase mb-2">Alerta de Rival!</h3>
+                <p className="text-lg text-slate-200 font-bold mb-6">"{rivalryNotification.message}"</p>
+                
+                <Button onClick={handleDismissRivalry} variant="danger" fullWidth className="animate-pulse">
+                    ACEITO O DESAFIO! 😡
+                </Button>
+            </div>
+        </div>
+      )}
+
       {isAvatarModalOpen && (
         <AvatarModal 
             currentAvatar={currentAvatarSrc} 
@@ -202,12 +239,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
       <div className="pt-2 pb-6">
         <Button 
             onClick={hasCheckedIn ? openProofModal : () => setIsCheckInModalOpen(true)} 
-            disabled={hasCheckedIn && !todaysCheckIn?.photo} 
+            disabled={loading || (hasCheckedIn && !todaysCheckIn?.photo)} 
             fullWidth 
             className={`py-6 text-xl uppercase tracking-widest shadow-xl ${!hasCheckedIn ? 'animate-pulse' : ''}`}
             variant={hasCheckedIn ? 'primary' : 'accent'}
         >
-            {hasCheckedIn ? 'Ver Comprovação 📸' : (isWeekend ? 'Check-in (XP x2) ⚡' : 'Fazer Check-in Agora')}
+            {loading ? 'Processando...' : (hasCheckedIn ? 'Ver Comprovação 📸' : (isWeekend ? 'Check-in (XP x2) ⚡' : 'Fazer Check-in Agora'))}
         </Button>
         {hasCheckedIn && (
             <p className="text-center text-slate-500 text-sm mt-3 animate-fade-in">
