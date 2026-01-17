@@ -17,23 +17,17 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
   // State for expanded comments: { checkInId: boolean }
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
 
-  // Lista de usuários ocultos no Feed
-  const HIDDEN_USERS = ['vitor_pulini@hotmail.com', 'administrador', 'admin'];
-
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
+        // getAllCheckIns already filters out posts, likes, and comments from hidden users
+        // getUsers also filters out hidden users from the list
         const [checkIns, users] = await Promise.all([
             getAllCheckIns(),
             getUsers()
         ]);
 
-        // Filtra check-ins de usuários ocultos
-        const visibleCheckIns = checkIns.filter(item => 
-            !HIDDEN_USERS.includes(item.user.name.toLowerCase())
-        );
-
-        setFeedData(visibleCheckIns);
+        setFeedData(checkIns);
         setAllUsers(users);
         setLoading(false);
     };

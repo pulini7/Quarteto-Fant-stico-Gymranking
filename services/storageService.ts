@@ -18,7 +18,8 @@ const TEST_USER_EMAIL = 'vitor_pulini@hotmail.com';
 const HIDDEN_NAMES = [TEST_USER_EMAIL, 'administrador', 'admin'];
 
 const isHiddenUser = (name: string): boolean => {
-    return HIDDEN_NAMES.includes(name.toLowerCase());
+    if (!name) return false;
+    return HIDDEN_NAMES.some(hidden => hidden.toLowerCase() === name.toLowerCase());
 };
 
 // --- Cleanup Helper for Test User ---
@@ -136,6 +137,8 @@ const mapUserFromDB = (dbUser: any): User => ({
 
 // --- Core Functions ---
 
+// Fetch users for PUBLIC display (Leaderboard, Profiles grid)
+// Must filter out hidden users
 export const getUsers = async (): Promise<User[]> => {
   // Try Supabase first
   // SECURITY UPDATE: We explicitly select columns to EXCLUDE 'password'.
@@ -150,6 +153,8 @@ export const getUsers = async (): Promise<User[]> => {
     `)
     .order('score', { ascending: false });
 
+  let users: User[] = [];
+
   if (error) {
     console.warn('Supabase error (switching to local):', error.message);
     // FALLBACK
@@ -162,16 +167,17 @@ export const getUsers = async (): Promise<User[]> => {
         }));
         return { ...u, check_ins: uCheckIns };
     });
-    return usersWithRelations.map(mapUserFromDB).sort((a: User, b: User) => b.score - a.score);
-  }
-  
-  if (!data || data.length === 0) {
+    users = usersWithRelations.map(mapUserFromDB).sort((a: User, b: User) => b.score - a.score);
+  } else if (!data || data.length === 0) {
       // If table exists but empty, seed it (Supabase only)
       await seedInitialData();
       return getUsers();
+  } else {
+      users = data.map(mapUserFromDB);
   }
 
-  return data.map(mapUserFromDB);
+  // ANONYMITY FILTER: Remove hidden users from the public list
+  return users.filter(u => !isHiddenUser(u.name));
 };
 
 const seedInitialData = async () => {
@@ -231,7 +237,8 @@ export const saveUser = async (user: User): Promise<void> => {
     }
 };
 
-// NEW: Function to check if user exists strictly (returns null if not found)
+// Internal function to check if user exists (used for Login)
+// This DOES NOT filter hidden users, allowing them to login.
 export const getUserByName = async (name: string): Promise<User | null> => {
   // Try Supabase
   const { data, error } = await supabase
@@ -492,6 +499,15 @@ export const getAllCheckIns = async () => {
     // SECURITY: Ensure expired test data is gone before loading feed
     await cleanupExpiredTestCheckIns();
 
+    // 1. Need to fetch ALL users first to identify IDs of hidden users for filtering likes/comments
+    // We cannot trust mapUserFromDB filtering here because we need the raw IDs for the filter
+    const { data: allUsersRaw } = await supabase.from('users').select('id, name');
+    
+    // List of IDs that are hidden
+    const hiddenUserIds = allUsersRaw 
+        ? allUsersRaw.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id)
+        : [];
+
     // Try Supabase
     const { data: checkIns, error } = await supabase
         .from('check_ins')
@@ -502,21 +518,27 @@ export const getAllCheckIns = async () => {
         `)
         .order('timestamp', { ascending: false });
     
+    let result = [];
+
     if (error) {
         console.warn("Supabase feed error (using local):", error.message);
         // FALLBACK
         const db = getLocalDB();
+        
+        // Local hidden IDs
+        const localHiddenIds = db.users.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id);
+
         const combined = db.check_ins.map((c: any) => {
             const u = db.users.find((user: any) => user.id === c.user_id);
             const comments = db.comments.filter((cm: any) => cm.check_in_id === c.id);
             return {
                 ...c,
                 comments: comments,
-                users: u // Structure matches Supabase response shape for mapper below
+                users: u 
             };
         }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-        return combined.map((row: any) => ({
+        result = combined.map((row: any) => ({
             user: {
                 id: row.users.id,
                 name: row.users.name,
@@ -528,11 +550,21 @@ export const getAllCheckIns = async () => {
             } as User,
             checkIn: mapCheckInFromDB(row)
         }));
+
+        // FILTER LOCAL
+        result = result.filter((item: any) => !isHiddenUser(item.user.name));
+        // Filter Likes and Comments in Local
+        result.forEach((item: any) => {
+             item.checkIn.likes = item.checkIn.likes.filter((id: string) => !localHiddenIds.includes(id));
+             item.checkIn.comments = item.checkIn.comments.filter((c: Comment) => !localHiddenIds.includes(c.userId));
+        });
+
+        return result;
     }
 
     if (!checkIns) return [];
 
-    return checkIns.map((row: any) => ({
+    result = checkIns.map((row: any) => ({
         user: {
             id: row.users.id,
             name: row.users.name,
@@ -544,6 +576,25 @@ export const getAllCheckIns = async () => {
         } as User,
         checkIn: mapCheckInFromDB(row)
     }));
+
+    // ANONYMITY FILTER (FEED):
+    // 1. Filter out posts (CheckIns) from hidden users
+    result = result.filter((item: any) => !isHiddenUser(item.user.name));
+
+    // 2. Filter out interactions (Likes and Comments) from hidden users on displayed posts
+    result.forEach((item: any) => {
+        // Filter Likes
+        if (item.checkIn.likes && item.checkIn.likes.length > 0) {
+            item.checkIn.likes = item.checkIn.likes.filter((userId: string) => !hiddenUserIds.includes(userId));
+        }
+        
+        // Filter Comments
+        if (item.checkIn.comments && item.checkIn.comments.length > 0) {
+            item.checkIn.comments = item.checkIn.comments.filter((comment: Comment) => !hiddenUserIds.includes(comment.userId));
+        }
+    });
+
+    return result;
 };
 
 export const toggleCheckInLike = async (checkInId: string, currentUserId: string): Promise<void> => {

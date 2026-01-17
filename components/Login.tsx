@@ -171,7 +171,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   if (loading && !selectedUser && !showLoginArea) {
-      return <div className="min-h-screen flex items-center justify-center text-brand-primary">Carregando academia...</div>;
+      return <div className="min-h-screen flex items-center justify-center text-brand-primary">Carregando GymRanking...</div>;
   }
 
   return (
@@ -344,7 +344,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 variant={(!selectedUser.password) ? 'accent' : 'primary'}
                 className="py-4 text-lg"
               >
-                {(!selectedUser.password) ? 'Registrar Senha' : 'Acessar Academia'}
+                {(!selectedUser.password) ? 'Registrar Senha' : 'Acessar GymRanking'}
               </Button>
             </form>
           </div>

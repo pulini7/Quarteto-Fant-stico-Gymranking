@@ -9,14 +9,11 @@ export const Leaderboard: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Lista de usuários que não devem aparecer no ranking (Admins/Sistema)
-  // Convertido para lowercase para comparação insensível a maiúsculas/minúsculas
-  const HIDDEN_USERS = ['vitor_pulini@hotmail.com', 'administrador', 'admin'];
-
   useEffect(() => {
     const loadUsers = async () => {
         setLoading(true);
         const data = await getUsers();
+        // getUsers from storageService now already filters hidden users
         setUsers(data);
         setLoading(false);
     };
@@ -71,7 +68,6 @@ export const Leaderboard: React.FC = () => {
     const startDate = getStartDate(timeframe);
 
     return users
-      .filter(u => !HIDDEN_USERS.includes(u.name.toLowerCase())) // Filtra Admins da lista visual
       .map(u => {
         const stats = calculatePeriodStats(u, startDate);
         return {
@@ -90,7 +86,6 @@ export const Leaderboard: React.FC = () => {
     const startDate = getStartDate('WEEK');
     
     const ranked = users
-        .filter(u => !HIDDEN_USERS.includes(u.name.toLowerCase())) // Filtra Admins do destaque
         .map(u => {
             const stats = calculatePeriodStats(u, startDate);
             return { ...u, periodScore: stats.score, periodCount: stats.count };
