@@ -151,37 +151,23 @@ export const saveUser = async (user: User): Promise<void> => {
     }
 };
 
-export const loginOrCreateUser = async (name: string): Promise<User> => {
+// NEW: Function to check if user exists strictly (returns null if not found)
+export const getUserByName = async (name: string): Promise<User | null> => {
   // Try Supabase
-  // Here we select * (including password) because we need to verify credentials
   const { data, error } = await supabase
     .from('users')
     .select(`*, check_ins(*, comments(*))`)
     .ilike('name', name)
     .single();
 
-  if (error && error.code !== 'PGRST116') { // PGRST116 is "Row not found" (which is fine, we create), others are errors
-      console.warn("Supabase Login Error (using local):", error.message);
-      // FALLBACK
+  if (error || !data) {
+      // FALLBACK Check
       const db = getLocalDB();
-      let localUser = db.users.find((u: any) => u.name.toLowerCase() === name.toLowerCase());
+      const localUser = db.users.find((u: any) => u.name.toLowerCase() === name.toLowerCase());
       
-      if (!localUser) {
-          // Create local
-          localUser = {
-            id: Date.now().toString(),
-            name: name,
-            avatar_seed: Math.floor(Math.random() * 1000),
-            score: 0,
-            streak: 0,
-            custom_avatar: null,
-            password: null
-          };
-          db.users.push(localUser);
-          saveLocalDB(db);
-      }
-      
-      // Join Checkins & Notifications for return
+      if (!localUser) return null;
+
+      // Join data for fallback
       const uCheckIns = db.check_ins.filter((c: any) => c.user_id === localUser.id).map((c: any) => ({
             ...c,
             comments: db.comments.filter((cm: any) => cm.check_in_id === c.id)
@@ -191,19 +177,23 @@ export const loginOrCreateUser = async (name: string): Promise<User> => {
       return mapUserFromDB({ ...localUser, check_ins: uCheckIns, notifications: uNotifs });
   }
 
-  if (data) {
-    // Supabase success
-    const { data: notifs } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', data.id);
+  // Supabase Success
+  const { data: notifs } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', data.id);
 
-    const user = mapUserFromDB(data);
-    user.notifications = notifs ? notifs.map(mapNotificationFromDB) : [];
-    return user;
-  }
+  const user = mapUserFromDB(data);
+  user.notifications = notifs ? notifs.map(mapNotificationFromDB) : [];
+  return user;
+};
 
-  // Create if not exists (Supabase)
+export const loginOrCreateUser = async (name: string): Promise<User> => {
+  // Try to find first
+  const existing = await getUserByName(name);
+  if (existing) return existing;
+
+  // If not found, create (Supabase)
   const newUser = {
     id: Date.now().toString(),
     name: name,
@@ -218,11 +208,20 @@ export const loginOrCreateUser = async (name: string): Promise<User> => {
     .select()
     .single();
 
-  if (createError || !created) {
-      throw new Error('Error creating user');
+  if (createError) {
+      // Fallback create
+      const db = getLocalDB();
+      const localUser = {
+        ...newUser,
+        custom_avatar: null,
+        password: null
+      };
+      db.users.push(localUser);
+      saveLocalDB(db);
+      return mapUserFromDB(localUser);
   }
 
-  return mapUserFromDB(created);
+  return mapUserFromDB(created!);
 };
 
 export const performCheckIn = async (userId: string, photoBase64: string, caption: string = ''): Promise<User | null> => {

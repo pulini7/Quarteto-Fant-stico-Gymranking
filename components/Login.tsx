@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { loginOrCreateUser, getUsers, saveUser } from '../services/storageService';
+import { loginOrCreateUser, getUsers, saveUser, getUserByName } from '../services/storageService';
 import { User } from '../types';
 import { Button } from './Button';
 
@@ -60,6 +60,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setLoading(true);
     try {
         // Busca a versão mais atualizada do usuário no DB
+        // Aqui ainda usamos loginOrCreateUser porque os botões são de usuários "aprovados/conhecidos" do app
         const realUser = await loginOrCreateUser(userPreview.name);
         setSelectedUser(realUser);
         setPasswordInput('');
@@ -108,12 +109,23 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setLoading(true);
 
     try {
-        const user = await loginOrCreateUser(loginName);
+        // Tenta buscar o usuário ESTRITAMENTE (sem criar)
+        let user = await getUserByName(loginName);
+
+        // Exceção: Se for 'Administrador' e não existir, permite criar para bootstrap
+        if (!user && loginName.toLowerCase() === 'administrador') {
+             user = await loginOrCreateUser(loginName);
+        }
+
+        if (!user) {
+            setError("Usuário não encontrado. Verifique o nome.");
+            setLoading(false);
+            return;
+        }
         
         // Lógica de Admin baseada no nome
         if (user.name.toLowerCase() === 'administrador') {
             user.isAdmin = true;
-            // Avatar padrão para admin se não tiver
             if (!user.customAvatar) {
                 user.customAvatar = "https://ui-avatars.com/api/?name=Admin&background=ef4444&color=fff";
             }
