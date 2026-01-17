@@ -37,7 +37,7 @@ export const GoatMascot: React.FC<GoatMascotProps> = ({ mood, onDismiss }) => {
       sound: 'MÉÉÉÉÉ!!! (feliz)'
     },
     CHECKIN_DONE: {
-      emoji: '🐐 💪 🔥',
+      emoji: '🐐',
       title: 'TREINO PAGO!',
       message: 'Boa! A cabra viu seu esforço. Mais um dia vencido, mais perto do objetivo. Continue firme!',
       color: 'from-emerald-500 to-green-800',

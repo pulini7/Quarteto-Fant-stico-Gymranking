@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Notification } from '../types';
 import { performCheckIn, getTodayString, clearNotifications, saveUser, getUsers } from '../services/storageService';
+import { playSound } from '../services/soundService';
 import { Button } from './Button';
 import { Confetti } from './Confetti';
 import { AvatarModal } from './AvatarModal';
@@ -21,25 +22,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   const [viewProofCaption, setViewProofCaption] = useState<string | undefined>(undefined);
   const [rivalryNotification, setRivalryNotification] = useState<Notification | null>(null);
   const [loading, setLoading] = useState(false);
-  
-  // Estado da Cabra
   const [goatMood, setGoatMood] = useState<GoatMood>(null);
+  
+  // Ref para detectar level up sem renderizar
+  const prevLevelRef = useRef(Math.floor((user.score || 0) / 100) + 1);
 
   const today = getTodayString();
-  const todaysCheckIn = user.checkIns.find(c => c.date === today);
+  
+  // Memoize checkin status to avoid array scan on every render
+  const todaysCheckIn = useMemo(() => 
+    user.checkIns.find(c => c.date === today), 
+  [user.checkIns, today]);
 
   // Check if it's weekend
   const d = new Date();
   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
 
-  // --- HEATMAP LOGIC ---
-  const currentYear = d.getFullYear();
-  const currentMonth = d.getMonth();
-  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  // --- RPG LEVEL LOGIC (Memoized) ---
+  const { level, currentLevelXp, xpToNextLevel, progressPercent, levelTitle } = useMemo(() => {
+      const lvl = Math.floor((user.score || 0) / 100) + 1;
+      const curXp = (user.score || 0) % 100;
+      const nextXp = 100;
+      const prog = (curXp / nextXp) * 100;
+      
+      let title = "Iniciante";
+      if (lvl >= 50) title = "Lenda Viva";
+      else if (lvl >= 20) title = "Monstro";
+      else if (lvl >= 10) title = "Maromba";
+      else if (lvl >= 5) title = "Rato de Academia";
 
-  // --- BADGES LOGIC ---
-  const badges = [
+      return { level: lvl, currentLevelXp: curXp, xpToNextLevel: nextXp, progressPercent: prog, levelTitle: title };
+  }, [user.score]);
+
+  // Efeito sonoro de Level UP
+  useEffect(() => {
+    if (level > prevLevelRef.current) {
+        playSound.levelUp();
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 5000);
+    }
+    prevLevelRef.current = level;
+  }, [level]);
+
+  // --- HEATMAP LOGIC (Memoized) ---
+  const { daysArray, daysInMonth, currentMonth, currentYear } = useMemo(() => {
+      const now = new Date();
+      const cYear = now.getFullYear();
+      const cMonth = now.getMonth();
+      const dInMonth = new Date(cYear, cMonth + 1, 0).getDate();
+      const dArray = Array.from({ length: dInMonth }, (_, i) => i + 1);
+      return { daysArray: dArray, daysInMonth: dInMonth, currentMonth: cMonth, currentYear: cYear };
+  }, []);
+
+  // --- BADGES LOGIC (Memoized) ---
+  const badges = useMemo(() => [
       { 
           id: 'weekend', 
           icon: '🍺', 
@@ -81,7 +117,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
           desc: '15 treinos totais',
           unlocked: user.checkIns.length >= 15
       }
-  ];
+  ], [user.checkIns, user.streak]);
 
   useEffect(() => {
     setHasCheckedIn(!!todaysCheckIn);
@@ -93,7 +129,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     }
 
     if (!todaysCheckIn && user.checkIns.length > 0) {
-        const lastCheckIn = [...user.checkIns].sort((a, b) => b.date.localeCompare(a.date))[0];
+        // Simple logic to find last checkin without expensive sort if possible
+        const sortedCheckIns = [...user.checkIns].sort((a, b) => b.date.localeCompare(a.date));
+        const lastCheckIn = sortedCheckIns[0];
+        
         if (lastCheckIn) {
             const lastDate = new Date(lastCheckIn.date + 'T12:00:00');
             const now = new Date();
@@ -110,6 +149,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   }, [user.notifications, user.checkIns, user.streak, todaysCheckIn]);
 
   const handleDismissRivalry = async () => {
+    playSound.click();
     setRivalryNotification(null);
     const updatedUser = await clearNotifications(user.id);
     if (updatedUser) {
@@ -122,6 +162,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     const updated = await performCheckIn(user.id, photoBase64, caption);
     
     if (updated) {
+        playSound.success();
         const allUsers = await getUsers();
         const validUsers = allUsers.filter(u => !['vitor_pulini@hotmail.com', 'administrador', 'admin'].includes(u.name.toLowerCase()));
         
@@ -137,9 +178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     if (updated) {
       onUpdateUser(updated);
       setHasCheckedIn(true);
-      setShowConfetti(true);
       setIsCheckInModalOpen(false);
-      setTimeout(() => setShowConfetti(false), 3000);
     }
   };
 
@@ -151,6 +190,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   };
 
   const openProofModal = () => {
+    playSound.click();
     if (todaysCheckIn) {
         setViewProofUrl(todaysCheckIn.photo);
         setViewProofCaption(todaysCheckIn.caption);
@@ -172,7 +212,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   return (
     <div className="space-y-6 animate-fade-in">
       {showConfetti && <Confetti />}
-      <GoatMascot mood={goatMood} onDismiss={() => setGoatMood(null)} />
+      <GoatMascot mood={goatMood} onDismiss={() => { playSound.click(); setGoatMood(null); }} />
 
       {/* RIVALRY ALERT MODAL */}
       {rivalryNotification && !goatMood && (
@@ -212,35 +252,51 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         </div>
       )}
 
+      {/* Main Profile Card with RPG Level Bar */}
       <div className="bg-brand-card rounded-3xl p-6 border border-slate-700 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 p-4 opacity-10">
             <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M6 5v14M18 5v14M2 12h20"/></svg>
         </div>
-        <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-4 py-6">
+        <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-4 py-4">
             <div className="relative group">
-                <div className="w-28 h-28 rounded-full bg-slate-700 p-1 border-2 border-brand-accent mb-2 overflow-hidden relative">
+                <div className="w-24 h-24 rounded-full bg-slate-700 p-1 border-2 border-brand-accent mb-2 overflow-hidden relative">
                     <img src={currentAvatarSrc} alt="Profile" className="w-full h-full rounded-full object-cover" />
                 </div>
-                <button onClick={() => setIsAvatarModalOpen(true)} className="absolute bottom-2 right-0 bg-brand-primary text-white p-2 rounded-full shadow-lg border-2 border-slate-800 hover:scale-110 transition-transform" title="Editar Avatar">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                <button onClick={() => { playSound.click(); setIsAvatarModalOpen(true); }} className="absolute bottom-2 right-0 bg-brand-primary text-white p-2 rounded-full shadow-lg border-2 border-slate-800 hover:scale-110 transition-transform" title="Editar Avatar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                 </button>
             </div>
-            <div>
-                <h2 className="text-2xl font-bold text-white">Olá, {user.name}!</h2>
-                <div className="flex items-center justify-center gap-2 mt-1">
-                   <span className="bg-slate-800/80 px-3 py-1 rounded-full text-xs font-bold text-brand-primary border border-slate-600">LVL {Math.floor((user.score || 0) / 100) + 1}</span>
-                   <span className="text-slate-400 text-sm">{user.score || 0} XP</span>
+            
+            <div className="w-full max-w-[200px]">
+                <h2 className="text-2xl font-bold text-white leading-none">{user.name}</h2>
+                <p className="text-xs text-brand-accent uppercase tracking-widest font-bold mb-3">{levelTitle}</p>
+                
+                {/* RPG Progress Bar */}
+                <div className="relative w-full h-4 bg-slate-800 rounded-full border border-slate-600 overflow-hidden shadow-inner">
+                    <div 
+                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 via-brand-primary to-brand-accent transition-all duration-1000 ease-out"
+                        style={{ width: `${progressPercent}%` }}
+                    >
+                        <div className="w-full h-full animate-pulse opacity-50 bg-white/20"></div>
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white drop-shadow-md z-10">
+                        NÍVEL {level}
+                    </div>
+                </div>
+                <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
+                    <span>{currentLevelXp} XP</span>
+                    <span>{xpToNextLevel} XP</span>
                 </div>
             </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center">
+        <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center transform hover:scale-[1.02] transition-transform">
             <p className="text-brand-accent text-3xl font-black">{user.streak}</p>
             <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">Dias Streak</p>
         </div>
-        <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center">
+        <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center transform hover:scale-[1.02] transition-transform">
             <p className="text-brand-primary text-3xl font-black">{user.checkIns.length}</p>
             <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">Total Treinos</p>
         </div>
@@ -290,7 +346,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         </h3>
         <div className="grid grid-cols-4 gap-2">
             {badges.map(badge => (
-                <div key={badge.id} className={`flex flex-col items-center p-2 rounded-xl border ${badge.unlocked ? 'bg-gradient-to-b from-slate-700 to-slate-800 border-yellow-500/30' : 'bg-slate-800/30 border-transparent opacity-50 grayscale'}`}>
+                <div 
+                    key={badge.id} 
+                    className={`flex flex-col items-center p-2 rounded-xl border transition-all ${badge.unlocked ? 'bg-gradient-to-b from-slate-700 to-slate-800 border-yellow-500/30 hover:scale-105 cursor-pointer' : 'bg-slate-800/30 border-transparent opacity-50 grayscale'}`}
+                    onClick={() => badge.unlocked && playSound.click()}
+                    title={badge.desc}
+                >
                     <div className={`text-2xl mb-1 ${badge.unlocked ? 'animate-bounce-subtle drop-shadow-md' : ''}`}>{badge.icon}</div>
                     <span className="text-[9px] text-center font-bold text-slate-300 leading-tight">{badge.title}</span>
                 </div>
@@ -301,7 +362,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
 
       <div className="pt-2 pb-6">
         <Button 
-            onClick={hasCheckedIn ? openProofModal : () => setIsCheckInModalOpen(true)} 
+            onClick={() => { playSound.click(); hasCheckedIn ? openProofModal() : setIsCheckInModalOpen(true); }} 
             disabled={loading || (hasCheckedIn && !todaysCheckIn?.photo)} 
             fullWidth 
             className={`py-6 text-xl uppercase tracking-widest shadow-xl ${!hasCheckedIn ? 'animate-pulse' : ''}`}

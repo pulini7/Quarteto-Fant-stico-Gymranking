@@ -1,17 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { User, Tab } from './types';
 import { Login } from './components/Login';
-import { Dashboard } from './components/Dashboard';
-import { Leaderboard } from './components/Leaderboard';
-import { CoachAI } from './components/CoachAI';
-import { Feed } from './components/Feed';
 import { Navbar } from './components/Navbar';
 import { CookieConsent } from './components/CookieConsent';
-import { getUsers, loginOrCreateUser } from './services/storageService';
+import { loginOrCreateUser } from './services/storageService';
+import { playSound } from './services/soundService';
+
+// Lazy loading components to reduce initial bundle size
+const Dashboard = lazy(() => import('./components/Dashboard').then(module => ({ default: module.Dashboard })));
+const Feed = lazy(() => import('./components/Feed').then(module => ({ default: module.Feed })));
+const Leaderboard = lazy(() => import('./components/Leaderboard').then(module => ({ default: module.Leaderboard })));
+const CoachAI = lazy(() => import('./components/CoachAI').then(module => ({ default: module.CoachAI })));
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   
   // Verifica sessão salva ao iniciar
   useEffect(() => {
@@ -44,6 +48,18 @@ const App: React.FC = () => {
       setUser(null);
   };
 
+  const toggleChat = () => {
+      playSound.click();
+      setIsChatOpen(!isChatOpen);
+  }
+
+  // Loading Fallback Component
+  const LoadingScreen = () => (
+    <div className="flex items-center justify-center h-64 animate-pulse">
+        <div className="text-brand-primary font-bold text-lg">Carregando...</div>
+    </div>
+  );
+
   if (!user) {
     return (
         <>
@@ -54,18 +70,13 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
-    switch (activeTab) {
-      case Tab.DASHBOARD:
-        return <Dashboard user={user} onUpdateUser={handleUpdateUser} />;
-      case Tab.FEED:
-        return <Feed currentUser={user} />;
-      case Tab.LEADERBOARD:
-        return <Leaderboard />;
-      case Tab.COACH:
-        return <CoachAI user={user} />;
-      default:
-        return <Dashboard user={user} onUpdateUser={handleUpdateUser} />;
-    }
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        {activeTab === Tab.DASHBOARD && <Dashboard user={user} onUpdateUser={handleUpdateUser} />}
+        {activeTab === Tab.FEED && <Feed currentUser={user} />}
+        {activeTab === Tab.LEADERBOARD && <Leaderboard />}
+      </Suspense>
+    );
   };
 
   return (
@@ -86,6 +97,26 @@ const App: React.FC = () => {
 
         {renderContent()}
       </div>
+      
+      {/* Floating Chat Button */}
+      <button 
+        onClick={toggleChat}
+        className="fixed bottom-24 right-4 z-40 w-16 h-16 bg-gradient-to-tr from-slate-700 to-slate-900 rounded-full shadow-[0_0_20px_rgba(59,130,246,0.5)] border-2 border-brand-primary flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-bounce-subtle overflow-hidden p-1"
+        title="Falar com Coach"
+      >
+        <img src="https://robohash.org/GYM-COACH-MUSCLE.png?set=set1" alt="Coach Robot" className="w-full h-full object-cover" />
+      </button>
+
+      {/* Chat Modal */}
+      {isChatOpen && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setIsChatOpen(false)}>
+            <div className="w-full max-w-lg h-[85vh] sm:h-[600px] bg-brand-card sm:rounded-3xl rounded-t-3xl shadow-2xl border border-slate-700 overflow-hidden flex flex-col animate-slide-up" onClick={e => e.stopPropagation()}>
+                <Suspense fallback={<LoadingScreen />}>
+                    <CoachAI user={user} onClose={() => setIsChatOpen(false)} />
+                </Suspense>
+            </div>
+        </div>
+      )}
       
       <Navbar activeTab={activeTab} onSwitch={setActiveTab} />
       <CookieConsent />

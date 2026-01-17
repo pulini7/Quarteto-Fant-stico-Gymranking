@@ -1,16 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './Button';
+import { analyzeWorkoutImage } from '../services/geminiService';
+import { playSound } from '../services/soundService';
 
 interface CheckInModalProps {
   onConfirm: (photoBase64: string, caption: string) => void;
   onClose: () => void;
 }
 
+const MUSCLE_GROUPS = [
+  "Peito", "Costas", "Bíceps", "Tríceps", 
+  "Pernas", "Glúteos", "Panturrilha", "Abdômen", "Cardio"
+];
+
 export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }) => {
   const [preview, setPreview] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -54,7 +63,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     }
   };
 
-  const takePhoto = () => {
+  const takePhoto = async () => {
+    playSound.camera(); // Efeito sonoro de obturador
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -75,34 +85,66 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
         setPreview(dataUrl);
         stopCamera();
+
+        // Start AI Analysis
+        setAnalyzing(true);
+        const suggestion = await analyzeWorkoutImage(dataUrl);
+        if (suggestion) {
+            // Se a IA sugerir algo, adicionamos, mas o usuário pode editar
+            setCaption(prev => prev ? `${prev} ${suggestion}` : suggestion);
+            playSound.success(); 
+        }
+        setAnalyzing(false);
       }
     }
   };
 
   const retakePhoto = () => {
     setPreview(null);
+    setCaption('');
+    setSelectedTags([]);
+    setAnalyzing(false);
     // O useEffect cuidará de reiniciar a câmera pois preview mudou para null
   };
 
   const toggleCamera = () => {
+    playSound.click();
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+  };
+
+  const toggleTag = (tag: string) => {
+    playSound.click();
+    setSelectedTags(prev => 
+      prev.includes(tag) 
+        ? prev.filter(t => t !== tag) 
+        : [...prev, tag]
+    );
   };
 
   const handleSubmit = () => {
     if (preview) {
-        onConfirm(preview, caption);
+        playSound.success();
+        
+        // Combina a legenda com as tags selecionadas
+        let finalCaption = caption.trim();
+        if (selectedTags.length > 0) {
+            const tagsString = selectedTags.map(t => `#${t}`).join(' ');
+            finalCaption = finalCaption ? `${finalCaption}\n\n${tagsString}` : tagsString;
+        }
+
+        onConfirm(preview, finalCaption);
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
-      <div className="bg-brand-card w-full max-w-md rounded-3xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-          <h3 className="text-xl font-bold text-white">Prova de Treino 📸</h3>
+      <div className="bg-brand-card w-full max-w-md rounded-3xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
+          <h3 className="text-lg font-bold text-white">Prova de Treino 📸</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
         </div>
 
-        <div className="p-6 flex-1 overflow-y-auto flex flex-col items-center justify-start space-y-6">
+        <div className="p-4 flex-1 overflow-y-auto flex flex-col items-center justify-start space-y-4 scrollbar-thin scrollbar-thumb-slate-700">
           {!preview ? (
             <div className="w-full flex flex-col items-center space-y-4">
                 <div className="relative w-full aspect-[3/4] bg-black rounded-2xl overflow-hidden shadow-lg border-2 border-slate-700">
@@ -145,24 +187,57 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             </div>
           ) : (
             <div className="w-full space-y-4">
-                <div className="relative rounded-2xl overflow-hidden border border-slate-600 shadow-lg bg-black">
-                    <img src={preview} alt="Proof" className="w-full h-auto max-h-[40vh] object-contain mx-auto" />
+                <div className="relative rounded-xl overflow-hidden border border-slate-600 shadow-lg bg-black">
+                    <img src={preview} alt="Proof" className="w-full h-auto max-h-[25vh] object-contain mx-auto" />
+                    {analyzing && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <div className="bg-slate-900/90 px-3 py-1.5 rounded-full border border-brand-accent/50 flex items-center gap-2 animate-pulse">
+                                <span className="text-lg">🤖</span>
+                                <span className="text-brand-accent text-xs font-bold">IA Analisando...</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
                 
-                <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">Legenda (Opcional)</label>
+                <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300 flex justify-between">
+                        <span>Legenda</span>
+                        {analyzing ? <span className="text-xs text-brand-accent animate-pulse">Gerando tags...</span> : <span className="text-[10px] text-slate-500">Opcional</span>}
+                    </label>
                     <textarea 
                         value={caption}
                         onChange={(e) => setCaption(e.target.value)}
-                        placeholder="Como foi o treino? Solta o verbo..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-brand-primary outline-none resize-none h-20"
+                        placeholder="Aguarde a IA ou escreva..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:ring-2 focus:ring-brand-primary outline-none resize-none h-16 transition-all"
                         maxLength={140}
                     />
                 </div>
 
+                <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">O que você treinou hoje?</label>
+                    <div className="flex flex-wrap gap-1.5">
+                        {MUSCLE_GROUPS.map((tag) => {
+                            const isSelected = selectedTags.includes(tag);
+                            return (
+                                <button
+                                    key={tag}
+                                    onClick={() => toggleTag(tag)}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all border ${
+                                        isSelected 
+                                            ? 'bg-brand-primary text-white border-brand-primary shadow-lg shadow-blue-900/30 scale-105' 
+                                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:text-white'
+                                    }`}
+                                >
+                                    {tag}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
                 <button 
                     onClick={retakePhoto}
-                    className="text-sm text-slate-400 hover:text-white underline w-full text-center py-2"
+                    className="text-xs text-slate-400 hover:text-white underline w-full text-center py-1"
                 >
                     Tirar outra foto
                 </button>
@@ -170,13 +245,13 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
           )}
         </div>
 
-        <div className="p-6 border-t border-slate-700 bg-slate-800/50">
+        <div className="p-4 border-t border-slate-700 bg-slate-800/50 shrink-0">
           <Button 
             onClick={handleSubmit} 
             fullWidth 
             variant="accent" 
-            disabled={!preview}
-            className="py-4 text-lg"
+            disabled={!preview || analyzing}
+            className="py-3 text-base shadow-xl"
           >
             Confirmar Check-in
           </Button>

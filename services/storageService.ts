@@ -455,6 +455,22 @@ export const addComment = async (checkInId: string, userId: string, text: string
     }
 }
 
+export const deleteCheckIn = async (checkInId: string): Promise<void> => {
+    // Delete comments first (if cascade isn't set, but standard SQL practice)
+    await supabase.from('comments').delete().eq('check_in_id', checkInId);
+    
+    // Delete checkin
+    const { error } = await supabase.from('check_ins').delete().eq('id', checkInId);
+
+    if (error) {
+        // Local Fallback
+        const db = getLocalDB();
+        db.check_ins = db.check_ins.filter((c: any) => c.id !== checkInId);
+        db.comments = db.comments.filter((c: any) => c.check_in_id !== checkInId);
+        saveLocalDB(db);
+    }
+};
+
 export const clearNotifications = async (userId: string): Promise<User | null> => {
     const { error } = await supabase.from('notifications').delete().eq('user_id', userId);
     
@@ -467,7 +483,7 @@ export const clearNotifications = async (userId: string): Promise<User | null> =
     return getUserByName((await supabase.from('users').select('name').eq('id', userId).single()).data.name);
 }
 
-export const getAllCheckIns = async () => {
+export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
     // Fire and forget cleanup
     cleanupExpiredTestCheckIns();
 
@@ -477,7 +493,10 @@ export const getAllCheckIns = async () => {
         ? allUsersRaw.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id)
         : [];
 
-    // OPTIMIZATION: Limit check-ins to latest 50 to prevent massive payload
+    const from = page * limit;
+    const to = from + limit - 1;
+
+    // OPTIMIZATION: Pagination with range
     const { data: checkIns, error } = await supabase
         .from('check_ins')
         .select(`
@@ -486,12 +505,12 @@ export const getAllCheckIns = async () => {
             users (id, name, avatar_seed, custom_avatar)
         `)
         .order('timestamp', { ascending: false })
-        .limit(50);
+        .range(from, to);
     
     let result = [];
 
     if (error) {
-        // Fallback Local
+        // Fallback Local with manual pagination
         const db = getLocalDB();
         const localHiddenIds = db.users.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id);
         const combined = db.check_ins.map((c: any) => {
@@ -500,7 +519,10 @@ export const getAllCheckIns = async () => {
             return { ...c, comments: comments, users: u };
         }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-        result = combined.map((row: any) => ({
+        // Slice for pagination
+        const paginatedCombined = combined.slice(from, from + limit);
+
+        result = paginatedCombined.map((row: any) => ({
             user: {
                 id: row.users.id,
                 name: row.users.name,

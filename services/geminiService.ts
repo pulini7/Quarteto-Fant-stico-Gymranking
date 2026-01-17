@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Chat } from "@google/genai";
 import { User } from '../types';
 
 const getAiClient = () => {
@@ -24,56 +24,59 @@ const COACH_TOPICS = [
   "Fortalecimento de core", "Postura no dia a dia", "Evitar overtraining", "Periodização de treino", "Deload week"
 ];
 
+// Mantém a função antiga para compatibilidade se necessário, mas o chat é o foco agora
 export const getCoachMessage = async (user: User): Promise<string> => {
   try {
     const ai = getAiClient();
-    
-    // Check if user has weekend workouts
-    const weekendWorkouts = user.checkIns.filter(c => {
-        const d = new Date(`${c.date}T12:00:00`);
-        const day = d.getDay();
-        return day === 0 || day === 6;
-    }).length;
-
-    // Aleatoriedade para simular um banco de dados gigante
-    const randomTopic = COACH_TOPICS[Math.floor(Math.random() * COACH_TOPICS.length)];
-    const tipNumber = Math.floor(Math.random() * 100) + 1; // Dica #1 a #100
-
-    const prompt = `
-      Você é o "Sargento Músculo", um treinador de academia intenso, motivador, mas engraçado e carismático.
-      O usuário se chama ${user.name} e faz parte do "Quarteto Fantástico".
-      
-      Estatísticas do Aluno:
-      - Total Treinos: ${user.checkIns.length}
-      - Streak Atual: ${user.streak} dias
-      - Treinos Fim de Semana: ${weekendWorkouts}
-      
-      SUA MISSÃO AGORA:
-      Acesse seu "Manual Secreto de 100 Regras" e forneça a **Dica #${tipNumber}**.
-      O tema desta dica específica deve ser sobre: **${randomTopic}**.
-      
-      Regras de Resposta:
-      - Responda em Português do Brasil.
-      - **Obrigatório começar a frase com: "Dica #${tipNumber}:"**
-      - Seja direto (máximo 2 frases curtas).
-      - Use gírias de maromba (shape, frango, monstro, meter o shape, fofo).
-      - Se ela tiver treinos no fim de semana (${weekendWorkouts} > 0), elogie a constância no final.
-      - Se o streak for baixo (< 3), mande ela largar o celular e agachar.
-    `;
-
+    const prompt = `Dê uma dica curta e motivadora de treino para ${user.name}.`;
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
-      config: {
-        temperature: 1.2, // Alta criatividade para variar as frases
-      }
     });
-
-    return response.text || `Dica #${tipNumber}: Sem falatório, mais agachamento! Vá treinar!`;
+    return response.text || "Vá treinar!";
   } catch (error) {
-    console.error("Gemini Error:", error);
-    return "O treinador está comendo batata doce agora. Tente pedir a dica novamente em alguns segundos.";
+    return "Foco no treino!";
   }
+};
+
+export const createCoachSession = (user: User): Chat => {
+  const ai = getAiClient();
+  
+  const weekendWorkouts = user.checkIns.filter(c => {
+      const d = new Date(`${c.date}T12:00:00`);
+      const day = d.getDay();
+      return day === 0 || day === 6;
+  }).length;
+
+  const systemInstruction = `
+    Você é o "Sargento Músculo" (ou Coach Quarteto), o melhor Personal Trainer do mundo e especialista absoluto em fitness, musculação, nutrição esportiva e fisiologia.
+    
+    PERFIL DO ALUNO:
+    - Nome: ${user.name}
+    - Streak Atual: ${user.streak} dias
+    - Total de Treinos: ${user.checkIns.length}
+    - Treinos em Fim de Semana: ${weekendWorkouts}
+    
+    SUA PERSONALIDADE:
+    - Você é extremamente motivador, mas rígido com a técnica.
+    - Você usa emojis de academia (💪, 🔥, 🏋️, 🦍).
+    - Você sabe tudo sobre execução de exercícios, divisão de treinos, suplementação e dieta.
+    - Se o usuário perguntar algo fora do contexto fitness (ex: política, matemática), responda com humor dizendo que isso não faz o músculo crescer e volte para o treino.
+    - Você fala de forma direta, usando gírias do meio maromba (shape, frango, anabólico, catabolizar, treino fofo).
+    
+    OBJETIVO:
+    - Tirar dúvidas do usuário.
+    - Corrigir mitos.
+    - Montar exemplos rápidos de treino se pedido.
+    - Motivar a ir treinar AGORA.
+  `;
+
+  return ai.chats.create({
+    model: 'gemini-3-flash-preview',
+    config: {
+      systemInstruction: systemInstruction,
+    }
+  });
 };
 
 export const generateAvatarImage = async (prompt: string): Promise<string | null> => {
@@ -109,3 +112,33 @@ export const generateAvatarImage = async (prompt: string): Promise<string | null
     throw error;
   }
 };
+
+export const analyzeWorkoutImage = async (base64Image: string): Promise<string> => {
+    try {
+        const ai = getAiClient();
+        // Remove data:image/jpeg;base64, prefix if present
+        const cleanBase64 = base64Image.split(',')[1] || base64Image;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: {
+                parts: [
+                    {
+                        inlineData: {
+                            mimeType: 'image/jpeg',
+                            data: cleanBase64
+                        }
+                    },
+                    {
+                        text: "Analise esta foto de academia. Descreva o exercício ou equipamento em 3 a 5 palavras. Depois sugira 3 hashtags curtas. Formato: 'Descrição. #Tag1 #Tag2 #Tag3'. Seja motivador e breve."
+                    }
+                ]
+            }
+        });
+
+        return response.text || "Treino pesado! #Foco #Gym";
+    } catch (error) {
+        console.error("Gemini Vision Error:", error);
+        return "";
+    }
+}

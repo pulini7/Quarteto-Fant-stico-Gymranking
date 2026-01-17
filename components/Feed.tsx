@@ -1,218 +1,471 @@
-import React, { useState, useEffect } from 'react';
-import { getAllCheckIns, toggleCheckInLike, addComment, getUsersLight } from '../services/storageService';
+import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import { getAllCheckIns, toggleCheckInLike, addComment, deleteCheckIn } from '../services/storageService';
 import { User, CheckIn } from '../types';
+import { playSound } from '../services/soundService';
 
 interface FeedProps {
     currentUser: User;
 }
 
-export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
-  const [feedData, setFeedData] = useState<{ user: User, checkIn: CheckIn }[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [loading, setLoading] = useState(true);
-  
-  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
-  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+// --- VISUAL COMPONENTS ---
 
-  useEffect(() => {
-    const loadData = async () => {
-        setLoading(true);
-        const [checkIns, users] = await Promise.all([
-            getAllCheckIns(),
-            getUsersLight()
-        ]);
-
-        setFeedData(checkIns);
-        setAllUsers(users);
-        setLoading(false);
-    };
-    loadData();
-  }, [refreshTrigger]);
-
-  const handleLike = async (checkInId: string) => {
-    // Toca um som de satisfação sutil (opcional, simulado visualmente)
-    await toggleCheckInLike(checkInId, currentUser.id);
-    setRefreshTrigger(prev => prev + 1);
-  };
-
-  const handlePostComment = async (checkInId: string) => {
-    const text = commentInputs[checkInId];
-    if (!text || !text.trim()) return;
-
-    await addComment(checkInId, currentUser.id, text);
-    setCommentInputs(prev => ({ ...prev, [checkInId]: '' }));
-    setExpandedComments(prev => ({ ...prev, [checkInId]: true }));
-    setRefreshTrigger(prev => prev + 1);
-  };
-
-  const toggleComments = (checkInId: string) => {
-    setExpandedComments(prev => ({ ...prev, [checkInId]: !prev[checkInId] }));
-  };
-
-  const handleShare = async (checkIn: CheckIn, userName: string) => {
-    const shareUrl = `${window.location.origin}/post/${checkIn.id}`;
-    const shareText = `🔥 ${userName} acabou de treinar no Quarteto Fantástico GymRank! "${checkIn.caption || 'Foco total!'}"`;
-
-    if (navigator.share) {
-        try {
-            await navigator.share({ title: 'GymRank Check-in', text: shareText, url: shareUrl });
-        } catch (error) { console.log('User cancelled share'); }
-    } else {
-        try {
-            await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
-            alert('Link copiado!');
-        } catch (err) { console.error('Failed to copy', err); }
-    }
-  };
-
-  const getUserName = (id: string) => {
-    const u = allUsers.find(user => user.id === id);
-    return u ? u.name : 'Desconhecido';
-  };
-
-  const formatTime = (isoString: string) => {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMins < 60) return `${diffMins}min atrás`;
-    if (diffHours < 24) return `${diffHours}h atrás`;
-    if (diffDays === 1) return `Ontem`;
-    return `${date.getDate()}/${date.getMonth() + 1}`;
-  };
-
-  if (loading && feedData.length === 0) {
-      return <div className="text-center py-10 text-slate-500">Carregando feed...</div>;
-  }
-
-  const reactions = [
-      { id: 'muscle', icon: '💪', label: 'Força' },
-      { id: 'fire', icon: '🔥', label: 'Brabo' },
-      { id: 'chicken', icon: '🐔', label: 'Frango' }, // Zuera
-      { id: 'goat', icon: '🐐', label: 'GOAT' }
-  ];
-
-  return (
-    <div className="space-y-4 animate-fade-in pb-20">
-      <div className="text-center mb-6">
-        <h2 className="text-2xl font-bold text-white">Feed da Academia</h2>
-        <p className="text-slate-400 text-sm">Acompanhe o foco da galera</p>
-      </div>
-
-      {feedData.length === 0 ? (
-        <div className="text-center py-10 text-slate-500">
-            <div className="text-4xl mb-3">📭</div>
-            <p>Nenhum check-in registrado ainda.</p>
+// Skeleton Loader para melhor percepção de performance
+const PostSkeleton = () => (
+    <div className="bg-brand-card rounded-3xl border border-slate-700 overflow-hidden shadow-xl mb-8 animate-pulse">
+        <div className="p-4 flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-full bg-slate-700"></div>
+            <div className="space-y-2">
+                <div className="h-3 w-24 bg-slate-700 rounded"></div>
+                <div className="h-2 w-16 bg-slate-800 rounded"></div>
+            </div>
         </div>
-      ) : (
-        <div className="space-y-8">
-          {feedData.map(({ user, checkIn }) => {
-            const likes = checkIn.likes || [];
-            const comments = checkIn.comments || [];
-            const isLiked = likes.includes(currentUser.id);
-            const isCommentsOpen = expandedComments[checkIn.id];
+        <div className="w-full aspect-square bg-slate-800"></div>
+        <div className="p-4 space-y-3">
+            <div className="h-8 w-full bg-slate-800 rounded-full"></div>
+            <div className="h-3 w-3/4 bg-slate-800 rounded"></div>
+        </div>
+    </div>
+);
 
-            return (
-                <div key={checkIn.id} className="bg-brand-card rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
-                    <div className="p-4 flex items-center space-x-3">
+// Imagem em tela cheia (Zoom)
+const ImageLightbox: React.FC<{ src: string; onClose: () => void }> = ({ src, onClose }) => {
+    useEffect(() => {
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = 'auto'; };
+    }, []);
+
+    return (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-2 animate-fade-in" onClick={onClose}>
+            <button onClick={onClose} className="absolute top-4 right-4 text-white p-2 bg-black/50 rounded-full z-10">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+            </button>
+            <img 
+                src={src} 
+                alt="Full size" 
+                className="max-w-full max-h-screen object-contain rounded-lg shadow-2xl transition-transform duration-300"
+                onClick={(e) => e.stopPropagation()} 
+            />
+        </div>
+    );
+};
+
+// --- LOGIC COMPONENTS ---
+
+const FeedPost = memo(({ 
+    checkIn, 
+    user, 
+    currentUser, 
+    onLike, 
+    onPostComment,
+    onDelete,
+    onImageClick
+}: { 
+    checkIn: CheckIn, 
+    user: User, 
+    currentUser: User, 
+    onLike: (id: string) => void, 
+    onPostComment: (id: string, text: string) => void,
+    onDelete: (id: string) => void,
+    onImageClick: (src: string) => void
+}) => {
+    const [commentText, setCommentText] = useState('');
+    const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+    const [shareSuccess, setShareSuccess] = useState(false);
+    const [showHeartAnimation, setShowHeartAnimation] = useState(false);
+    
+    // Double Tap Logic
+    const lastClickRef = useRef<number>(0);
+
+    const likes = checkIn.likes || [];
+    const comments = checkIn.comments || [];
+    const isLiked = likes.includes(currentUser.id);
+    const isOwnerOrAdmin = currentUser.id === user.id || currentUser.isAdmin;
+
+    const formatTime = (isoString: string) => {
+        const date = new Date(isoString);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        
+        if (diffMins < 1) return 'Agora mesmo';
+        if (diffMins < 60) return `${diffMins} min`;
+        if (diffHours < 24) return `${diffHours} h`;
+        return `${date.getDate()}/${date.getMonth() + 1}`;
+    };
+
+    const handleCommentSubmit = () => {
+        if (commentText.trim()) {
+            onPostComment(checkIn.id, commentText);
+            setCommentText('');
+            setIsCommentsOpen(true);
+        }
+    }
+
+    const handleShare = async () => {
+        playSound.click();
+        const shareData = {
+            title: `Treino de ${user.name} no GymRanking`,
+            text: `Confira o check-in de ${user.name}: "${checkIn.caption || 'Foco total!'}"`,
+            url: `${window.location.origin}?post=${checkIn.id}`
+        };
+
+        if (navigator.share) {
+            try { await navigator.share(shareData); } catch (err) { /* ignore */ }
+        } else {
+            try {
+                await navigator.clipboard.writeText(`${shareData.text} \n${shareData.url}`);
+                setShareSuccess(true);
+                setTimeout(() => setShareSuccess(false), 2000);
+            } catch (err) { console.error(err); }
+        }
+    };
+
+    const toggleLike = () => {
+        if (!isLiked) {
+            playSound.click(); // Standard click sound
+        }
+        onLike(checkIn.id);
+    };
+
+    const handleImageClick = (e: React.MouseEvent) => {
+        const now = Date.now();
+        const DOUBLE_TAP_DELAY = 300;
+
+        if (now - lastClickRef.current < DOUBLE_TAP_DELAY) {
+            // Double Tap Detected
+            if (!isLiked) {
+                toggleLike();
+            }
+            setShowHeartAnimation(true);
+            setTimeout(() => setShowHeartAnimation(false), 1000);
+            playSound.success(); // Satisfying pop sound
+        } else {
+            // Single Tap (Wait briefly to confirm it's not a double tap before zooming? No, instant zoom is better UX, double tap overrides)
+            // We'll just open zoom immediately. If they double tap, the animation shows on top.
+            onImageClick(checkIn.photo);
+        }
+        lastClickRef.current = now;
+    };
+
+    const handleDelete = () => {
+        if (window.confirm("Tem certeza que deseja apagar este post?")) {
+            onDelete(checkIn.id);
+        }
+    };
+    
+    return (
+        <div className="bg-brand-card rounded-3xl border border-slate-700 overflow-hidden shadow-xl mb-8 relative">
+            <div className="p-4 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                    <div className="p-[2px] rounded-full bg-gradient-to-tr from-yellow-400 to-brand-primary">
                         <img 
                             src={user.customAvatar || `https://picsum.photos/seed/${user.avatarSeed}/100`} 
-                            className="w-10 h-10 rounded-full object-cover border border-slate-600"
+                            className="w-9 h-9 rounded-full object-cover border-2 border-brand-card"
                             alt={user.name}
                             loading="lazy"
                         />
-                        <div>
-                            <h3 className="font-bold text-white text-sm">{user.name}</h3>
-                            <p className="text-xs text-slate-400">{formatTime(checkIn.timestamp)}</p>
-                        </div>
                     </div>
-                    
-                    <div className="w-full bg-black aspect-square md:aspect-video relative group">
-                        {checkIn.photo ? (
-                            <img src={checkIn.photo} alt="Workout" className="w-full h-full object-contain" loading="lazy" />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-500 text-xs">Sem foto</div>
-                        )}
-                        {/* Double tap hint could go here */}
-                    </div>
-
-                    <div className="p-4 bg-slate-800/50">
-                        {/* Custom Reactions Bar */}
-                        <div className="flex justify-between items-center mb-3">
-                            <div className="flex bg-slate-900/80 rounded-full p-1 border border-slate-700 shadow-inner">
-                                {reactions.map(r => (
-                                    <button 
-                                        key={r.id}
-                                        onClick={() => handleLike(checkIn.id)}
-                                        className={`w-9 h-9 flex items-center justify-center rounded-full text-lg transition-all active:scale-90 hover:bg-slate-700
-                                            ${isLiked ? 'opacity-100 grayscale-0 scale-110' : 'opacity-60 grayscale hover:grayscale-0 hover:opacity-100'}
-                                        `}
-                                        title={r.label}
-                                    >
-                                        {r.icon}
-                                    </button>
-                                ))}
-                            </div>
-
-                            <div className="flex space-x-3">
-                                <button onClick={() => toggleComments(checkIn.id)} className="text-slate-400 hover:text-white">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                                </button>
-                                <button onClick={() => handleShare(checkIn, getUserName(checkIn.user?.id || ''))} className="text-slate-400 hover:text-brand-primary">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div className="text-sm mb-2 font-medium text-white flex items-center gap-1">
-                            {likes.length > 0 && (
-                                <>
-                                    <span className="text-brand-accent">💪</span>
-                                    <span>{likes.length} reações</span>
-                                </>
-                            )}
-                        </div>
-
-                        {checkIn.caption && (
-                            <div className="mb-3 text-sm">
-                                <span className="font-bold text-white mr-2">{user.name}</span>
-                                <span className="text-slate-300">{checkIn.caption}</span>
-                            </div>
-                        )}
-
-                        {isCommentsOpen && (
-                            <div className="mt-4 pt-4 border-t border-slate-700/50 animate-fade-in">
-                                <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">
-                                    {comments.length === 0 ? (
-                                        <p className="text-xs text-slate-500 italic">Seja a primeira a comentar...</p>
-                                    ) : (
-                                        comments.map((comment) => (
-                                            <div key={comment.id} className="text-sm">
-                                                <span className="font-bold text-slate-300 mr-2">{getUserName(comment.userId)}</span>
-                                                <span className="text-slate-400">{comment.text}</span>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                                <div className="flex gap-2">
-                                    <input type="text" placeholder="Adicionar comentário..." className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-brand-primary" value={commentInputs[checkIn.id] || ''} onChange={(e) => setCommentInputs(prev => ({...prev, [checkIn.id]: e.target.value}))} onKeyPress={(e) => e.key === 'Enter' && handlePostComment(checkIn.id)} />
-                                    <button onClick={() => handlePostComment(checkIn.id)} disabled={!commentInputs[checkIn.id]} className="text-brand-primary font-bold text-sm disabled:opacity-50">Enviar</button>
-                                </div>
-                            </div>
-                        )}
-
-                        {!isCommentsOpen && comments.length > 0 && (
-                             <button onClick={() => toggleComments(checkIn.id)} className="text-xs text-slate-500 mt-2">Ver todos os {comments.length} comentários</button>
-                        )}
+                    <div>
+                        <h3 className="font-bold text-white text-sm leading-none mb-1">{user.name}</h3>
+                        <p className="text-[10px] text-slate-400 font-medium">{formatTime(checkIn.timestamp)} • Treino</p>
                     </div>
                 </div>
-            )
-          })}
+                {isOwnerOrAdmin && (
+                    <button onClick={handleDelete} className="text-slate-500 hover:text-red-500 p-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                    </button>
+                )}
+            </div>
+            
+            <div className="w-full bg-black aspect-square md:aspect-video relative group cursor-pointer" onClick={handleImageClick}>
+                {checkIn.photo ? (
+                    <img src={checkIn.photo} alt="Workout" className="w-full h-full object-contain" loading="lazy" />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-500 text-xs">Sem foto</div>
+                )}
+                
+                {/* Big Heart Animation Overlay */}
+                {showHeartAnimation && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 animate-ping-short">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="white" stroke="none" className="drop-shadow-2xl opacity-90"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                    </div>
+                )}
+            </div>
+
+            <div className="p-4 bg-slate-800/30">
+                <div className="flex justify-between items-center mb-3">
+                    <div className="flex items-center gap-4">
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); toggleLike(); }}
+                            className={`flex items-center gap-1.5 transition-all active:scale-90 ${isLiked ? 'text-red-500' : 'text-slate-200 hover:text-white'}`}
+                        >
+                             <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill={isLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth={isLiked ? "0" : "2"} strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        </button>
+                        
+                        <button 
+                             onClick={() => setIsCommentsOpen(!isCommentsOpen)} 
+                             className="text-slate-200 hover:text-white transition-all active:scale-90"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        </button>
+
+                        <button 
+                            onClick={handleShare} 
+                            className={`text-slate-200 hover:text-white transition-all active:scale-90 ${shareSuccess ? 'text-brand-accent' : ''}`}
+                        >
+                            {shareSuccess ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+                            )}
+                        </button>
+                    </div>
+                </div>
+                
+                <div className="text-sm font-bold text-white mb-2">
+                    {likes.length} {likes.length === 1 ? 'curtida' : 'curtidas'}
+                </div>
+
+                <div className="mb-2 text-sm">
+                    <span className="font-bold text-white mr-2">{user.name}</span>
+                    <span className="text-slate-300 leading-relaxed break-words">{checkIn.caption}</span>
+                </div>
+
+                {!isCommentsOpen && comments.length > 0 && (
+                    <button onClick={() => setIsCommentsOpen(true)} className="text-sm text-slate-500 mb-2">
+                        Ver todos os {comments.length} comentários
+                    </button>
+                )}
+
+                {isCommentsOpen && (
+                    <div className="mt-2 animate-fade-in">
+                        <div className="space-y-2 mb-3 max-h-48 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700">
+                            {comments.map((comment) => (
+                                <div key={comment.id} className="text-sm flex gap-2">
+                                    <span className="font-bold text-slate-300 text-xs mt-0.5">Usuário</span>
+                                    <span className="text-slate-400 leading-snug">{comment.text}</span>
+                                </div>
+                            ))}
+                            {comments.length === 0 && <p className="text-xs text-slate-600 italic">Nenhum comentário ainda.</p>}
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex gap-3 items-center mt-3 pt-3 border-t border-slate-700/50">
+                    <img src={currentUser.customAvatar || `https://picsum.photos/seed/${currentUser.avatarSeed}/50`} className="w-7 h-7 rounded-full object-cover" alt="Me" />
+                    <div className="flex-1 relative">
+                        <input 
+                            type="text" 
+                            placeholder="Adicione um comentário..." 
+                            className="w-full bg-transparent text-sm text-white focus:outline-none placeholder:text-slate-600" 
+                            value={commentText} 
+                            onChange={(e) => setCommentText(e.target.value)} 
+                            onKeyPress={(e) => e.key === 'Enter' && handleCommentSubmit()} 
+                        />
+                    </div>
+                    {commentText && (
+                        <button onClick={handleCommentSubmit} className="text-brand-primary font-bold text-xs uppercase hover:text-blue-400">
+                            Publicar
+                        </button>
+                    )}
+                </div>
+            </div>
         </div>
+    );
+});
+
+export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
+  const [feedData, setFeedData] = useState<{ user: User, checkIn: CheckIn }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [isPulling, setIsPulling] = useState(false);
+  
+  // Infinite Scroll State
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const PAGE_SIZE = 5;
+
+  // Refs
+  const observer = useRef<IntersectionObserver | null>(null);
+  const feedContainerRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef(0);
+
+  // --- TOUCH HANDLERS (Pull to Refresh) ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+      if (window.scrollY === 0) {
+          touchStartY.current = e.touches[0].clientY;
+      }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+      const currentY = e.touches[0].clientY;
+      if (window.scrollY === 0 && currentY - touchStartY.current > 80) {
+          setIsPulling(true);
+      } else {
+          setIsPulling(false);
+      }
+  };
+
+  const handleTouchEnd = () => {
+      if (isPulling) {
+          playSound.success();
+          setIsPulling(false);
+          setLoading(true);
+          setPage(0); // Force Refresh
+          setRefreshTrigger(prev => prev + 1);
+      }
+  };
+
+  const lastElementRef = useCallback((node: HTMLDivElement | null) => {
+      if (loading) return;
+      if (observer.current) observer.current.disconnect();
+      observer.current = new IntersectionObserver(entries => {
+          if (entries[0].isIntersecting && hasMore) {
+              setPage(prevPage => prevPage + 1);
+          }
+      });
+      if (node) observer.current.observe(node);
+  }, [loading, hasMore]);
+
+  // Load Data
+  useEffect(() => {
+    const loadData = async () => {
+        // If refreshing (page 0), show loading but don't clear data immediately to prevent flicker unless empty
+        if (page === 0) setLoading(true);
+
+        const newCheckIns = await getAllCheckIns(page, PAGE_SIZE);
+        
+        setFeedData(prev => {
+            if (page === 0) return newCheckIns;
+            const existingIds = new Set(prev.map(p => p.checkIn.id));
+            const uniqueNew = newCheckIns.filter(p => !existingIds.has(p.checkIn.id));
+            return [...prev, ...uniqueNew];
+        });
+
+        if (newCheckIns.length < PAGE_SIZE) setHasMore(false);
+        else setHasMore(true);
+        
+        setLoading(false);
+    };
+    loadData();
+  }, [page, refreshTrigger]);
+
+  const handleLike = useCallback(async (checkInId: string) => {
+    await toggleCheckInLike(checkInId, currentUser.id);
+    // Optimistic update logic could go here, but for now we just rely on next fetch or parent re-render? 
+    // Actually, FeedPost manages its own "isLiked" derived from props. 
+    // Ideally we update local state too:
+    setFeedData(prev => prev.map(item => {
+        if (item.checkIn.id === checkInId) {
+            const likes = item.checkIn.likes || [];
+            const newLikes = likes.includes(currentUser.id) 
+                ? likes.filter(id => id !== currentUser.id)
+                : [...likes, currentUser.id];
+            return { ...item, checkIn: { ...item.checkIn, likes: newLikes } };
+        }
+        return item;
+    }));
+  }, [currentUser.id]);
+
+  const handlePostComment = useCallback(async (checkInId: string, text: string) => {
+    await addComment(checkInId, currentUser.id, text);
+    // Simple local update for responsiveness (assuming success)
+    setFeedData(prev => prev.map(item => {
+        if (item.checkIn.id === checkInId) {
+             const newComment = { id: Date.now().toString(), userId: currentUser.id, text, timestamp: new Date().toISOString() };
+             return { ...item, checkIn: { ...item.checkIn, comments: [...(item.checkIn.comments || []), newComment] } };
+        }
+        return item;
+    }));
+  }, [currentUser.id]);
+
+  const handleDeletePost = useCallback(async (checkInId: string) => {
+      await deleteCheckIn(checkInId);
+      playSound.error(); // Sound like trash bin
+      setFeedData(prev => prev.filter(item => item.checkIn.id !== checkInId));
+  }, []);
+
+  return (
+    <div 
+        ref={feedContainerRef}
+        className="space-y-4 animate-fade-in pb-20 min-h-screen"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+    >
+      <style>{`
+        @keyframes ping-short {
+          0% { transform: scale(0.5); opacity: 0; }
+          50% { opacity: 1; }
+          100% { transform: scale(1.5); opacity: 0; }
+        }
+        .animate-ping-short {
+          animation: ping-short 0.6s cubic-bezier(0, 0, 0.2, 1) forwards;
+        }
+      `}</style>
+
+      {/* Pull Refresh Indicator */}
+      <div className={`fixed top-16 left-0 right-0 z-40 flex justify-center transition-all duration-300 ${isPulling ? 'translate-y-4 opacity-100' : '-translate-y-10 opacity-0'}`}>
+          <div className="bg-brand-primary text-white px-4 py-2 rounded-full shadow-lg font-bold text-xs flex items-center gap-2">
+             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+             Solte para atualizar
+          </div>
+      </div>
+
+      <div className="text-center mb-6 pt-2">
+        <h2 className="text-2xl font-black italic tracking-tighter text-white">FEED DA GALERA</h2>
+        <p className="text-slate-400 text-xs">Acompanhe a evolução do time</p>
+      </div>
+
+      {activeImage && <ImageLightbox src={activeImage} onClose={() => setActiveImage(null)} />}
+
+      {/* Skeletons on Initial Load */}
+      {loading && page === 0 && (
+          <div className="space-y-8">
+              <PostSkeleton />
+              <PostSkeleton />
+          </div>
+      )}
+
+      {feedData.length === 0 && !loading && (
+        <div className="text-center py-20 text-slate-500 opacity-60">
+            <div className="text-5xl mb-4 grayscale">📸</div>
+            <p className="font-medium">Tudo calmo por aqui...</p>
+            <p className="text-xs">Seja a primeira a postar hoje!</p>
+        </div>
+      )}
+      
+      <div className="space-y-2">
+          {feedData.map(({ user, checkIn }, index) => {
+            const isLast = feedData.length === index + 1;
+            return (
+                <div ref={isLast ? lastElementRef : null} key={checkIn.id}>
+                    <FeedPost 
+                        checkIn={checkIn}
+                        user={user}
+                        currentUser={currentUser}
+                        onLike={handleLike}
+                        onPostComment={handlePostComment}
+                        onDelete={handleDeletePost}
+                        onImageClick={setActiveImage}
+                    />
+                </div>
+            );
+          })}
+      </div>
+      
+      {loading && page > 0 && (
+          <div className="py-8 flex justify-center">
+              <div className="w-6 h-6 border-2 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
+          </div>
+      )}
+      
+      {!hasMore && feedData.length > 5 && (
+          <div className="text-center py-8">
+              <span className="text-[10px] text-slate-700 font-bold uppercase tracking-widest border border-slate-800 px-3 py-1 rounded-full">Isso é tudo, pessoal!</span>
+          </div>
       )}
     </div>
   );
