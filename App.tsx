@@ -6,17 +6,41 @@ import { Leaderboard } from './components/Leaderboard';
 import { CoachAI } from './components/CoachAI';
 import { Feed } from './components/Feed';
 import { Navbar } from './components/Navbar';
-import { getUsers } from './services/storageService';
+import { getUsers, loginOrCreateUser } from './services/storageService';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   
-  // No real app, we would check for a session token here.
-  // For now, we start at login.
+  // Verifica sessão salva ao iniciar
+  useEffect(() => {
+    const checkSession = async () => {
+        const storedName = localStorage.getItem('gymrank_auth_user');
+        if (storedName) {
+            try {
+                // Tenta logar automaticamente com o nome salvo
+                const u = await loginOrCreateUser(storedName);
+                if (u) {
+                    setUser(u);
+                } else {
+                    localStorage.removeItem('gymrank_auth_user');
+                }
+            } catch (e) {
+                console.error("Erro ao restaurar sessão:", e);
+                localStorage.removeItem('gymrank_auth_user');
+            }
+        }
+    };
+    checkSession();
+  }, []);
   
   const handleUpdateUser = (updatedUser: User) => {
     setUser(updatedUser);
+  };
+
+  const handleLogout = () => {
+      localStorage.removeItem('gymrank_auth_user');
+      setUser(null);
   };
 
   if (!user) {
@@ -47,7 +71,7 @@ const App: React.FC = () => {
                 QUARTETO FANTÁSTICO<br/>GYMRANKING
             </h1>
             <button 
-                onClick={() => setUser(null)} 
+                onClick={handleLogout} 
                 className="text-xs text-slate-500 hover:text-white transition-colors"
             >
                 Sair

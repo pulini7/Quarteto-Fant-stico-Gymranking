@@ -17,6 +17,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [loginName, setLoginName] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   
+  // Persistence State
+  const [rememberMe, setRememberMe] = useState(false);
+  
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -77,6 +80,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const handleUserSelect = async (userPreview: User) => {
     setError(null);
     setLoading(true);
+    setRememberMe(false); // Reset checkbox default
     try {
         // Busca a versão mais atualizada do usuário no DB
         // Aqui ainda usamos loginOrCreateUser porque os botões são de usuários "aprovados/conhecidos" do app
@@ -88,6 +92,13 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     } finally {
         setLoading(false);
     }
+  };
+
+  const finalizeLogin = (user: User) => {
+    if (rememberMe) {
+        localStorage.setItem('gymrank_auth_user', user.name);
+    }
+    onLogin(user);
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -103,12 +114,12 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     if (!selectedUser.password) {
       const updatedUser = { ...selectedUser, password: passwordInput };
       await saveUser(updatedUser); // Salva a nova senha no Supabase
-      onLogin(updatedUser);
+      finalizeLogin(updatedUser);
     } 
     // Fluxo de Login (Verificar Senha)
     else {
       if (selectedUser.password === passwordInput) {
-        onLogin(selectedUser);
+        finalizeLogin(selectedUser);
       } else {
         setError("Senha incorreta. Tente novamente.");
         setPasswordInput('');
@@ -155,10 +166,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             // Primeiro acesso via login geral
             const updatedUser = { ...user, password: loginPassword };
             await saveUser(updatedUser);
-            onLogin(updatedUser);
+            finalizeLogin(updatedUser);
         } else {
             if (user.password === loginPassword) {
-                onLogin(user);
+                finalizeLogin(user);
             } else {
                 setError("Senha incorreta.");
             }
@@ -181,7 +192,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       <div className="w-full p-4 flex justify-end absolute top-0 left-0 z-20">
         {!showLoginArea ? (
             <button 
-                onClick={() => setShowLoginArea(true)}
+                onClick={() => { setShowLoginArea(true); setRememberMe(false); }}
                 className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700 hover:bg-slate-700"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>
@@ -215,7 +226,19 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                             placeholder="Senha"
                             className="bg-slate-900 text-white text-sm px-3 py-2 rounded border border-slate-600 focus:border-brand-primary outline-none"
                         />
-                        <button type="submit" className="bg-brand-primary text-white text-sm font-bold px-3 py-2 rounded hover:bg-blue-600 transition-colors shadow-lg">
+                        
+                        <div className="flex items-center gap-2 px-1">
+                            <input 
+                                type="checkbox" 
+                                id="generic-remember" 
+                                checked={rememberMe} 
+                                onChange={(e) => setRememberMe(e.target.checked)}
+                                className="accent-brand-primary cursor-pointer"
+                            />
+                            <label htmlFor="generic-remember" className="text-xs text-slate-400 cursor-pointer select-none">Manter conectado</label>
+                        </div>
+
+                        <button type="submit" className="bg-brand-primary text-white text-sm font-bold px-3 py-2 rounded hover:bg-blue-600 transition-colors shadow-lg mt-1">
                             Entrar
                         </button>
                     </form>
@@ -336,6 +359,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     ⚠️ {error}
                   </p>
                 )}
+              </div>
+
+              <div className="flex items-center justify-center gap-2 mb-2">
+                 <input 
+                    type="checkbox" 
+                    id="modal-remember" 
+                    checked={rememberMe} 
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 accent-brand-primary cursor-pointer rounded bg-slate-800 border-slate-600 focus:ring-brand-primary"
+                 />
+                 <label htmlFor="modal-remember" className="text-sm text-slate-400 cursor-pointer select-none">Manter conectado</label>
               </div>
 
               <Button 
