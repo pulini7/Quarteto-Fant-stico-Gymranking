@@ -241,6 +241,9 @@ export const deleteUser = async (userId: string): Promise<void> => {
 };
 
 export const saveUser = async (user: User): Promise<void> => {
+    // SANDBOX: Se for o usuário de teste, não salva nada
+    if (user.name === TEST_USER_EMAIL) return;
+
     const { error } = await supabase.from('users').update({
         custom_avatar: user.customAvatar,
         password: user.password
@@ -402,6 +405,36 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       return await saveToLocalFallback(userId, photoBase64, caption);
   }
 
+  // --- SANDBOX MODE FOR TEST USER ---
+  // If user is test user, SIMULATE success but DO NOT SAVE to database.
+  if (userDB.name === TEST_USER_EMAIL) {
+      console.log("Sandbox Mode Active: Check-in simulated locally only.");
+      const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
+      const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
+
+      // Create updated user object for UI
+      const uiUser = mapUserFromDB(userDB);
+      uiUser.score = newScore;
+      uiUser.streak = newStreak;
+      
+      const fakeCheckIn: CheckIn = {
+          id: `sandbox-${Date.now()}`,
+          date: today,
+          timestamp: new Date().toISOString(),
+          photo: photoBase64,
+          videos: [],
+          likes: [],
+          caption: caption,
+          comments: []
+      };
+      
+      // Prepend to array so it shows up
+      uiUser.checkIns = [fakeCheckIn, ...uiUser.checkIns];
+      
+      return uiUser;
+  }
+  // --- END SANDBOX MODE ---
+
   // Check valid stats
   const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
   if (hasCheckInToday) return await loginOrCreateUser(userDB.name);
@@ -452,6 +485,9 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 };
 
 export const addVideoToCheckIn = async (checkInId: string, videoBase64: string): Promise<boolean> => {
+    // SANDBOX: If checking starts with sandbox (fake ID), return true immediately
+    if (checkInId.startsWith('sandbox-')) return true;
+
     const { data, error } = await supabase.from('check_ins').select('videos').eq('id', checkInId).single();
     if (error) {
         const db = getLocalDB();
@@ -471,6 +507,10 @@ export const addVideoToCheckIn = async (checkInId: string, videoBase64: string):
 }
 
 export const addComment = async (checkInId: string, userId: string, text: string): Promise<void> => {
+    // SANDBOX: If user is test user, return success without saving
+    const { data: u } = await supabase.from('users').select('name').eq('id', userId).single();
+    if (u && u.name === TEST_USER_EMAIL) return;
+
     const { error } = await supabase.from('comments').insert({
         id: Date.now().toString(),
         check_in_id: checkInId,
@@ -590,6 +630,10 @@ export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
 };
 
 export const toggleCheckInLike = async (checkInId: string, currentUserId: string): Promise<void> => {
+    // SANDBOX
+    const { data: u } = await supabase.from('users').select('name').eq('id', currentUserId).single();
+    if (u && u.name === TEST_USER_EMAIL) return;
+
     const { data, error } = await supabase.from('check_ins').select('likes').eq('id', checkInId).single();
     if (error) {
         const db = getLocalDB();
