@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { loginOrCreateUser, getUsers, saveUser, getUserByName } from '../services/storageService';
+import { loginOrCreateUser, getUsers, saveUser, getUserByName, deleteUser } from '../services/storageService';
 import { User } from '../types';
 import { Button } from './Button';
 
@@ -25,6 +25,25 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const fetchUsers = async () => {
         try {
             const allUsers = await getUsers();
+
+            // CLEANUP AUTOMÁTICO: Remove usuários lixo solicitados
+            const garbageUsers = allUsers.filter(u => ['aaaa', 'aaa'].includes(u.name.toLowerCase()));
+            if (garbageUsers.length > 0) {
+                console.log("Cleaning up garbage users:", garbageUsers);
+                await Promise.all(garbageUsers.map(u => deleteUser(u.id)));
+                // Recarrega lista após limpeza
+                const cleanedUsers = await getUsers();
+                // Continua com a lista limpa
+                const specificNames = ['Aline', 'Samila', 'Pâmela', 'Taís'];
+                const displayProfiles = specificNames.map(name => {
+                  const existing = cleanedUsers.find(u => u.name.toLowerCase() === name.toLowerCase());
+                  if (existing) return existing;
+                  return { id: name, name: name, avatarSeed: Math.random(), checkIns: [], streak: 0, score: 0 } as User;
+                });
+                setProfiles(displayProfiles);
+                setLoading(false);
+                return;
+            }
             
             // Garante a ordem específica e que existam visualmente
             const specificNames = ['Aline', 'Samila', 'Pâmela', 'Taís'];

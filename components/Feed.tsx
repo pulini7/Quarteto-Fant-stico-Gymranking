@@ -17,6 +17,9 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
   // State for expanded comments: { checkInId: boolean }
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
 
+  // Lista de usuários ocultos no Feed
+  const HIDDEN_USERS = ['vitor_pulini@hotmail.com', 'administrador', 'admin'];
+
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
@@ -24,7 +27,13 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
             getAllCheckIns(),
             getUsers()
         ]);
-        setFeedData(checkIns);
+
+        // Filtra check-ins de usuários ocultos
+        const visibleCheckIns = checkIns.filter(item => 
+            !HIDDEN_USERS.includes(item.user.name.toLowerCase())
+        );
+
+        setFeedData(visibleCheckIns);
         setAllUsers(users);
         setLoading(false);
     };

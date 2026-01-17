@@ -9,6 +9,10 @@ export const Leaderboard: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Lista de usuários que não devem aparecer no ranking (Admins/Sistema)
+  // Convertido para lowercase para comparação insensível a maiúsculas/minúsculas
+  const HIDDEN_USERS = ['vitor_pulini@hotmail.com', 'administrador', 'admin'];
+
   useEffect(() => {
     const loadUsers = async () => {
         setLoading(true);
@@ -66,27 +70,31 @@ export const Leaderboard: React.FC = () => {
   const leaderboardData = useMemo(() => {
     const startDate = getStartDate(timeframe);
 
-    return users.map(u => {
-      const stats = calculatePeriodStats(u, startDate);
-      return {
-        ...u,
-        periodScore: stats.score,
-        periodCount: stats.count
-      };
-    }).sort((a, b) => {
-        // Ordena por Score do Período, desempata por quantidade de treinos
-        return (b.periodScore - a.periodScore) || (b.periodCount - a.periodCount);
-    });
+    return users
+      .filter(u => !HIDDEN_USERS.includes(u.name.toLowerCase())) // Filtra Admins da lista visual
+      .map(u => {
+        const stats = calculatePeriodStats(u, startDate);
+        return {
+          ...u,
+          periodScore: stats.score,
+          periodCount: stats.count
+        };
+      }).sort((a, b) => {
+          // Ordena por Score do Período, desempata por quantidade de treinos
+          return (b.periodScore - a.periodScore) || (b.periodCount - a.periodCount);
+      });
   }, [timeframe, users]);
 
   // Atleta da Semana (Separado para ficar sempre fixo no topo, independente da aba selecionada)
   const athleteOfTheWeek = useMemo(() => {
     const startDate = getStartDate('WEEK');
     
-    const ranked = users.map(u => {
-        const stats = calculatePeriodStats(u, startDate);
-        return { ...u, periodScore: stats.score, periodCount: stats.count };
-    }).sort((a, b) => (b.periodScore - a.periodScore) || (b.periodCount - a.periodCount));
+    const ranked = users
+        .filter(u => !HIDDEN_USERS.includes(u.name.toLowerCase())) // Filtra Admins do destaque
+        .map(u => {
+            const stats = calculatePeriodStats(u, startDate);
+            return { ...u, periodScore: stats.score, periodCount: stats.count };
+        }).sort((a, b) => (b.periodScore - a.periodScore) || (b.periodCount - a.periodCount));
 
     // Só retorna se tiver alguém com pontuação > 0
     return ranked[0]?.periodScore > 0 ? ranked[0] : null;
@@ -224,24 +232,37 @@ export const Leaderboard: React.FC = () => {
 
                     <div className="flex-1">
                         <div className="flex justify-between items-center pr-2">
-                             <h3 className={`font-bold text-base leading-tight ${isTop3 ? 'text-white' : 'text-slate-300'}`}>
-                                {u.name}
-                             </h3>
-                             <span className={`text-xl font-black ${isTop3 ? 'text-white' : 'text-slate-500'}`}>
-                                {score} <span className="text-[10px] text-slate-600 font-normal uppercase">XP</span>
-                             </span>
-                        </div>
-                        
-                        <div className="flex items-center mt-1 space-x-3 text-xs text-slate-500 font-medium">
-                            <span className="flex items-center gap-1">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 5v14M18 5v14M2 12h20"/></svg>
-                                {count} treinos
-                            </span>
-                            {u.streak > 0 && (
-                                <span className="flex items-center gap-1 text-brand-accent/80">
-                                    🔥 Streak atual: {u.streak}
-                                </span>
-                            )}
+                             <div>
+                                <h3 className={`font-bold text-base leading-tight ${isTop3 ? 'text-white' : 'text-slate-300'}`}>
+                                    {u.name}
+                                </h3>
+                                {u.streak > 0 && (
+                                    <div className="flex items-center gap-1 mt-1 text-xs text-brand-accent/80 font-medium">
+                                        🔥 Streak: {u.streak}
+                                    </div>
+                                )}
+                             </div>
+                             
+                             <div className="flex items-center gap-4">
+                                {/* Check-ins Stats - Coluna Dedicada */}
+                                <div className="text-right flex flex-col items-end">
+                                    <span className={`font-bold text-sm ${isTop3 ? 'text-slate-200' : 'text-slate-400'}`}>
+                                        {count}
+                                    </span>
+                                    <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">Treinos</span>
+                                </div>
+
+                                {/* Vertical Divider */}
+                                <div className="w-px h-6 bg-slate-700"></div>
+
+                                {/* XP Stats */}
+                                <div className="text-right flex flex-col items-end min-w-[3rem]">
+                                    <span className={`text-xl font-black leading-none ${isTop3 ? 'text-white' : 'text-slate-500'}`}>
+                                        {score}
+                                    </span>
+                                    <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">XP</span>
+                                </div>
+                             </div>
                         </div>
                     </div>
                 </div>

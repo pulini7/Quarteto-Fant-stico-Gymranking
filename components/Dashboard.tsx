@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { User, Notification } from '../types';
-import { performCheckIn, getTodayString, clearNotifications, saveUser } from '../services/storageService';
+import { performCheckIn, getTodayString, clearNotifications, saveUser, getUsers } from '../services/storageService';
 import { Button } from './Button';
 import { Confetti } from './Confetti';
 import { AvatarModal } from './AvatarModal';
 import { CheckInModal } from './CheckInModal';
+import { GoatMascot, GoatMood } from './GoatMascot';
 
 interface DashboardProps {
   user: User;
@@ -20,6 +21,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   const [viewProofCaption, setViewProofCaption] = useState<string | undefined>(undefined);
   const [rivalryNotification, setRivalryNotification] = useState<Notification | null>(null);
   const [loading, setLoading] = useState(false);
+  
+  // Estado da Cabra
+  const [goatMood, setGoatMood] = useState<GoatMood>(null);
 
   const today = getTodayString();
   const todaysCheckIn = user.checkIns.find(c => c.date === today);
@@ -32,13 +36,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     setHasCheckedIn(!!todaysCheckIn);
   }, [user, todaysCheckIn]);
 
-  // Check for provocations on mount
+  // Check for provocations and GOAT Logic on mount
   useEffect(() => {
+    // 1. Notificações de Rivalidade
     if (user.notifications && user.notifications.length > 0) {
-        // Show the first one
         setRivalryNotification(user.notifications[0]);
     }
-  }, [user.notifications]);
+
+    // Lógica da Cabra (Só executa se não tiver feito check-in hoje ainda, para evitar spam ao recarregar após check-in)
+    if (!todaysCheckIn && user.checkIns.length > 0) {
+        const lastCheckIn = [...user.checkIns].sort((a, b) => b.date.localeCompare(a.date))[0];
+        if (lastCheckIn) {
+            const lastDate = new Date(lastCheckIn.date + 'T12:00:00'); // Fix timezone issue
+            const now = new Date();
+            const diffTime = Math.abs(now.getTime() - lastDate.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) - 1; // -1 porque se foi ontem, diff é 1, mas inatividade é 0
+
+            // Cabra Dormindo: 3 dias sem ir
+            if (diffDays >= 3) {
+                setGoatMood('SLEEPING');
+            } 
+            // Cabra Decepcionada: Quebra de Streak
+            // Se o streak está zerado, mas tenho check-ins antigos, e a diferença não é gigante (ex: perdi só ontem ou anteontem)
+            else if (user.streak === 0 && diffDays >= 1 && diffDays < 3) {
+                setGoatMood('DISAPPOINTED');
+            }
+        }
+    }
+  }, [user.notifications, user.checkIns, user.streak, todaysCheckIn]);
 
   const handleDismissRivalry = async () => {
     setRivalryNotification(null);
@@ -51,6 +76,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   const handleCheckInComplete = async (photoBase64: string, caption: string) => {
     setLoading(true);
     const updated = await performCheckIn(user.id, photoBase64, caption);
+    
+    if (updated) {
+        const allUsers = await getUsers();
+        // Filtra users sistema se necessário
+        const validUsers = allUsers.filter(u => !['vitor_pulini@hotmail.com', 'administrador', 'admin'].includes(u.name.toLowerCase()));
+        
+        // Lógica de Comemoração da Cabra
+        if (validUsers.length > 0 && validUsers[0].id === updated.id) {
+            // Se eu sou o primeiro (Líder)
+            setTimeout(() => setGoatMood('CELEBRATING'), 500);
+        } else {
+            // Check-in normal
+            setTimeout(() => setGoatMood('CHECKIN_DONE'), 500);
+        }
+    }
+
     setLoading(false);
     
     if (updated) {
@@ -97,8 +138,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     <div className="space-y-6 animate-fade-in">
       {showConfetti && <Confetti />}
       
+      {/* GOAT MASCOT MODAL */}
+      <GoatMascot mood={goatMood} onDismiss={() => setGoatMood(null)} />
+
       {/* RIVALRY ALERT MODAL */}
-      {rivalryNotification && (
+      {rivalryNotification && !goatMood && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-red-900/80 backdrop-blur-md animate-bounce-in">
             <div className="bg-brand-card border-2 border-red-500 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 animate-pulse"></div>

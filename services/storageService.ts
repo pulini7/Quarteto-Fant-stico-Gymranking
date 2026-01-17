@@ -13,6 +13,58 @@ export const isWeekend = (dateString: string): boolean => {
   return day === 0 || day === 6;
 };
 
+// --- Security / Filtering Helpers ---
+const TEST_USER_EMAIL = 'vitor_pulini@hotmail.com';
+const HIDDEN_NAMES = [TEST_USER_EMAIL, 'administrador', 'admin'];
+
+const isHiddenUser = (name: string): boolean => {
+    return HIDDEN_NAMES.includes(name.toLowerCase());
+};
+
+// --- Cleanup Helper for Test User ---
+const TEST_USER_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+const cleanupExpiredTestCheckIns = async () => {
+    // 1. Calculate Cutoff Time
+    const cutoffDate = new Date(Date.now() - TEST_USER_TTL_MS);
+    const cutoffISO = cutoffDate.toISOString();
+
+    // 2. Find Test User ID (Supabase)
+    const { data: user } = await supabase
+        .from('users')
+        .select('id')
+        .ilike('name', TEST_USER_EMAIL)
+        .single();
+
+    if (user) {
+        // Delete Check-ins older than 10 mins for this user
+        await supabase
+            .from('check_ins')
+            .delete()
+            .eq('user_id', user.id)
+            .lt('timestamp', cutoffISO);
+            
+        // Note: Comments cascade delete via SQL usually, but if not, they remain orphaned or handled by RLS.
+    }
+
+    // 3. Fallback Local Storage Cleanup
+    const db = getLocalDB();
+    const localUser = db.users.find((u: any) => u.name.toLowerCase() === TEST_USER_EMAIL.toLowerCase());
+    
+    if (localUser) {
+        const initialLength = db.check_ins.length;
+        db.check_ins = db.check_ins.filter((c: any) => {
+            if (c.user_id !== localUser.id) return true;
+            const cDate = new Date(c.timestamp);
+            return cDate > cutoffDate; // Keep if newer than cutoff
+        });
+        
+        if (db.check_ins.length !== initialLength) {
+            saveLocalDB(db);
+        }
+    }
+};
+
 // --- Local Storage Fallback Helpers ---
 
 const LOCAL_DB_KEY = 'gymrank_supa_fallback_v1';
@@ -132,6 +184,34 @@ const seedInitialData = async () => {
     await supabase.from('users').upsert(seedUsers);
 }
 
+// NEW: Delete User Function
+export const deleteUser = async (userId: string): Promise<void> => {
+    // 1. Delete Notifications
+    await supabase.from('notifications').delete().eq('user_id', userId);
+    await supabase.from('notifications').delete().eq('from_user_id', userId);
+    
+    // 2. Delete Comments
+    await supabase.from('comments').delete().eq('user_id', userId);
+    
+    // 3. Delete CheckIns (Comments on these checkins will cascade if SQL configured, else manual)
+    await supabase.from('check_ins').delete().eq('user_id', userId);
+    
+    // 4. Delete User
+    const { error } = await supabase.from('users').delete().eq('id', userId);
+
+    // Fallback Local Storage Cleanup
+    const db = getLocalDB();
+    if (db.users.some((u: any) => u.id === userId)) {
+        db.users = db.users.filter((u: any) => u.id !== userId);
+        db.check_ins = db.check_ins.filter((c: any) => c.user_id !== userId);
+        db.comments = db.comments.filter((c: any) => c.user_id !== userId);
+        db.notifications = db.notifications.filter((n: any) => n.user_id !== userId && n.from_user_id !== userId);
+        saveLocalDB(db);
+    }
+
+    if (error) console.error("Error deleting user:", error);
+};
+
 export const saveUser = async (user: User): Promise<void> => {
     // Try Supabase
     const { error } = await supabase.from('users').update({
@@ -225,6 +305,9 @@ export const loginOrCreateUser = async (name: string): Promise<User> => {
 };
 
 export const performCheckIn = async (userId: string, photoBase64: string, caption: string = ''): Promise<User | null> => {
+  // Trigger Cleanup for Test User every time ANY check-in happens (keeps DB clean)
+  await cleanupExpiredTestCheckIns();
+
   const today = getTodayString();
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -275,21 +358,25 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       user.streak = newStreak;
 
       // Notifications (Provocation)
-      db.users.forEach((other: any) => {
-          if (other.id !== userId) {
-             if (other.score >= (user.score - (isWeekend(today) ? 20 : 10)) && other.score < newScore) {
-                 db.notifications.push({
-                      id: Date.now().toString() + Math.random(),
-                      type: 'OVERTAKE',
-                      user_id: other.id,
-                      from_user_id: userId,
-                      message: `${user.name} ultrapassou você hoje. Vai deixar?`,
-                      timestamp: new Date().toISOString(),
-                      read: false
-                 });
-             }
-          }
-      });
+      // FILTER: Only generate notifications if current user is NOT hidden
+      if (!isHiddenUser(user.name)) {
+          db.users.forEach((other: any) => {
+            // FILTER: Don't notify hidden users
+            if (other.id !== userId && !isHiddenUser(other.name)) {
+                if (other.score >= (user.score - (isWeekend(today) ? 20 : 10)) && other.score < newScore) {
+                    db.notifications.push({
+                        id: Date.now().toString() + Math.random(),
+                        type: 'OVERTAKE',
+                        user_id: other.id,
+                        from_user_id: userId,
+                        message: `${user.name} ultrapassou você hoje. Vai deixar?`,
+                        timestamp: new Date().toISOString(),
+                        read: false
+                    });
+                }
+            }
+          });
+      }
 
       saveLocalDB(db);
       return await loginOrCreateUser(user.name);
@@ -324,22 +411,26 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       streak: newStreak
   }).eq('id', userId);
 
-  // Provocation
-  const { data: allUsers } = await supabase.from('users').select('id, name, score');
-  if (allUsers) {
-      const oldScore = userDB.score || 0;
-      for (const other of allUsers) {
-          if (other.id !== userId) {
-              if (other.score >= oldScore && other.score < newScore) {
-                  await supabase.from('notifications').insert({
-                      id: Date.now().toString() + Math.random(),
-                      type: 'OVERTAKE',
-                      user_id: other.id,
-                      from_user_id: userId,
-                      message: `${userDB.name} ultrapassou você hoje. Vai deixar?`,
-                      timestamp: new Date().toISOString(),
-                      read: false
-                  });
+  // Provocation Logic
+  // FILTER: Only generate notifications if current user is NOT hidden
+  if (!isHiddenUser(userDB.name)) {
+      const { data: allUsers } = await supabase.from('users').select('id, name, score');
+      if (allUsers) {
+          const oldScore = userDB.score || 0;
+          for (const other of allUsers) {
+              // FILTER: Don't notify hidden users
+              if (other.id !== userId && !isHiddenUser(other.name)) {
+                  if (other.score >= oldScore && other.score < newScore) {
+                      await supabase.from('notifications').insert({
+                          id: Date.now().toString() + Math.random(),
+                          type: 'OVERTAKE',
+                          user_id: other.id,
+                          from_user_id: userId,
+                          message: `${userDB.name} ultrapassou você hoje. Vai deixar?`,
+                          timestamp: new Date().toISOString(),
+                          read: false
+                      });
+                  }
               }
           }
       }
@@ -398,6 +489,9 @@ export const clearNotifications = async (userId: string): Promise<User | null> =
 }
 
 export const getAllCheckIns = async () => {
+    // SECURITY: Ensure expired test data is gone before loading feed
+    await cleanupExpiredTestCheckIns();
+
     // Try Supabase
     const { data: checkIns, error } = await supabase
         .from('check_ins')
