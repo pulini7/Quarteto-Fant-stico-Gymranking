@@ -25,6 +25,12 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+      isMountedRef.current = true;
+      return () => { isMountedRef.current = false; };
+  }, []);
 
   // Iniciar câmera ao montar ou mudar o modo (frontal/traseira)
   useEffect(() => {
@@ -43,8 +49,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         video: { 
           facingMode: facingMode,
           // Pede resolução menor para iniciar mais rápido
-          width: { ideal: 1280 }, 
-          height: { ideal: 720 }
+          width: { ideal: 640 }, 
+          height: { ideal: 480 }
         } 
       });
       
@@ -71,8 +77,11 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const video = videoRef.current;
       const canvas = canvasRef.current;
       
-      // OTIMIZAÇÃO CRÍTICA: Redimensionar imagem para evitar Payload Too Large no Supabase e lentidão na IA
-      const MAX_WIDTH = 800;
+      if (video.readyState !== 4) return; // Wait for video to be ready
+
+      // AGGRESSIVE OPTIMIZATION: 480px width max, 0.5 quality
+      // This ensures the base64 string is tiny (~30-50kb) preventing UI freeze during transfer
+      const MAX_WIDTH = 480;
       const scale = video.videoWidth > MAX_WIDTH ? MAX_WIDTH / video.videoWidth : 1;
       
       canvas.width = video.videoWidth * scale;
@@ -88,26 +97,27 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Compressão JPEG 0.6 para reduzir tamanho drasticamente (de 5MB para ~100KB)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        // Compressão JPEG 0.5 (Quality vs Size tradeoff optimized for mobile networks)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
         
         setPreview(dataUrl);
         stopCamera();
 
-        // Start AI Analysis em Background (Sem await para não bloquear a UI)
+        // Start AI Analysis em Background
         setAnalyzing(true);
         analyzeWorkoutImage(dataUrl).then((suggestion) => {
+             if (!isMountedRef.current) return; // Prevent update if unmounted
+             
              if (suggestion) {
-                 // Só preenche se o usuário ainda não digitou nada ou se quiser complementar
                  setCaption(prev => {
-                     if (prev.length > 5) return prev; // Se o usuário já escreveu, não sobrescreve
+                     if (prev.length > 5) return prev; 
                      return suggestion;
                  });
                  if (!isSubmitting) playSound.success(); 
              }
              setAnalyzing(false);
         }).catch(() => {
-            setAnalyzing(false);
+            if (isMountedRef.current) setAnalyzing(false);
         });
       }
     }
@@ -147,8 +157,18 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             finalCaption = finalCaption ? `${finalCaption}\n\n${tagsString}` : tagsString;
         }
 
-        onConfirm(preview, finalCaption);
-        // Não resetamos isSubmitting aqui porque o modal vai fechar/desmontar
+        // Safety Timeout: If network hangs for 10s, release button
+        const safetyTimer = setTimeout(() => {
+            if (isMountedRef.current) {
+                setIsSubmitting(false);
+                alert("O envio está demorando muito. Verifique sua conexão e tente novamente.");
+            }
+        }, 15000);
+
+        // We wrap onConfirm to clear timeout if it returns successfully (though modal closes usually)
+        Promise.resolve(onConfirm(preview, finalCaption)).finally(() => {
+            clearTimeout(safetyTimer);
+        });
     }
   };
 

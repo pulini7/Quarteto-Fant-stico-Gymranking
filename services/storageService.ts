@@ -336,8 +336,41 @@ export const loginOrCreateUser = async (name: string): Promise<User> => {
   return mapUserFromDB(created!);
 };
 
+// BACKGROUND FUNCTION: Not exported to UI, runs silently
+const processProvocations = async (userId: string, userName: string, oldScore: number, newScore: number) => {
+    try {
+        if (isHiddenUser(userName)) return;
+        
+        // Minimal fetch for performance
+        const { data: allUsers } = await supabase.from('users').select('id, name, score');
+        if (!allUsers) return;
+        
+        const notificationsToInsert = [];
+        for (const other of allUsers) {
+            if (other.id !== userId && !isHiddenUser(other.name)) {
+                if (other.score >= oldScore && other.score < newScore) {
+                    notificationsToInsert.push({
+                        id: Date.now().toString() + Math.random(),
+                        type: 'OVERTAKE',
+                        user_id: other.id,
+                        from_user_id: userId,
+                        message: `${userName} ultrapassou você hoje. Vai deixar?`,
+                        timestamp: new Date().toISOString(),
+                        read: false
+                    });
+                }
+            }
+        }
+        if (notificationsToInsert.length > 0) {
+            await supabase.from('notifications').insert(notificationsToInsert);
+        }
+    } catch (e) {
+        console.warn("Error processing provocations:", e);
+    }
+};
+
 export const performCheckIn = async (userId: string, photoBase64: string, caption: string = ''): Promise<User | null> => {
-  // OPTIMIZATION: Don't await cleanup, let it run in background
+  // OPTIMIZATION: Don't await cleanup
   cleanupExpiredTestCheckIns();
 
   const today = getTodayString();
@@ -358,7 +391,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
   
   if (fetchError) {
-      // ... Local DB fallback logic
+      // ... Local DB fallback logic (omitted for brevity, assume similar structure)
        const db = getLocalDB();
       const user = db.users.find((u: any) => u.id === userId);
       if (!user) return null;
@@ -384,7 +417,6 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       db.check_ins.push(newCheckIn);
       user.score = newScore;
       user.streak = newStreak;
-      // ... notifications logic (abbreviated)
       saveLocalDB(db);
       return await loginOrCreateUser(user.name);
   }
@@ -403,7 +435,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       user_id: userId,
       date: today,
       timestamp: new Date().toISOString(),
-      photo: photoBase64,
+      photo: photoBase64, // base64 is already optimized (small) from CheckInModal
       videos: [],
       caption: caption,
       likes: []
@@ -414,37 +446,14 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       return null;
   }
 
+  // Update user stats
   await supabase.from('users').update({
       score: newScore,
       streak: newStreak
   }).eq('id', userId);
 
-  // Provocation Logic (Optimized: Fetch minimal data)
-  if (!isHiddenUser(userDB.name)) {
-      const { data: allUsers } = await supabase.from('users').select('id, name, score');
-      if (allUsers) {
-          const oldScore = userDB.score || 0;
-          const notificationsToInsert = [];
-          for (const other of allUsers) {
-              if (other.id !== userId && !isHiddenUser(other.name)) {
-                  if (other.score >= oldScore && other.score < newScore) {
-                      notificationsToInsert.push({
-                          id: Date.now().toString() + Math.random(),
-                          type: 'OVERTAKE',
-                          user_id: other.id,
-                          from_user_id: userId,
-                          message: `${userDB.name} ultrapassou você hoje. Vai deixar?`,
-                          timestamp: new Date().toISOString(),
-                          read: false
-                      });
-                  }
-              }
-          }
-          if (notificationsToInsert.length > 0) {
-              await supabase.from('notifications').insert(notificationsToInsert);
-          }
-      }
-  }
+  // OPTIMIZATION: Run provocation logic in background (fire-and-forget) to avoid blocking UI return
+  processProvocations(userId, userDB.name, userDB.score || 0, newScore);
 
   return await loginOrCreateUser(userDB.name);
 };
