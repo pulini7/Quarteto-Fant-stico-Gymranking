@@ -94,7 +94,7 @@ const FormattedText: React.FC<{ text: string; isUser: boolean }> = ({ text, isUs
 export const CoachAI: React.FC<CoachAIProps> = ({ user, onClose }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Começa true para evitar envio antes da conexão
   const chatSessionRef = useRef<Chat | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -110,34 +110,38 @@ export const CoachAI: React.FC<CoachAIProps> = ({ user, onClose }) => {
   useEffect(() => {
     const initChat = async () => {
       try {
+        // Tenta criar a sessão. Se falhar (ex: API Key), cai no catch.
         const chat = createCoachSession(user);
         chatSessionRef.current = chat;
         
-        setIsLoading(true);
-        setTimeout(async () => {
-            try {
-                // Mensagem inicial do sistema pedindo proatividade
-                const response = await chat.sendMessage({ message: "Se apresente para o aluno de forma breve, com energia, usando formatação (negrito para destaque). Pergunte qual o treino de hoje." });
-                if (response.text) {
-                    setMessages([{
-                        id: 'init',
-                        role: 'model',
-                        text: response.text
-                    }]);
-                }
-            } catch (e) {
+        // Envia mensagem inicial para "aquecer" o bot
+        try {
+            const response = await chat.sendMessage({ message: "Se apresente para o aluno de forma breve, com energia, usando formatação (negrito para destaque). Pergunte qual o treino de hoje." });
+            if (response.text) {
                 setMessages([{
                     id: 'init',
                     role: 'model',
-                    text: `Fala **${user.name}**! Coach Quarteto na área. 🦍\n\nQual a dúvida sobre o treino de hoje? 💪`
+                    text: response.text
                 }]);
-            } finally {
-                setIsLoading(false);
             }
-        }, 500);
-
+        } catch (msgError) {
+            console.warn("Erro na mensagem de boas vindas, usando fallback local.", msgError);
+            // Fallback se a API responder com erro mas o cliente estiver ok
+            setMessages([{
+                id: 'init',
+                role: 'model',
+                text: `Fala **${user.name}**! Coach Quarteto na área. 🦍\n\nQual a dúvida sobre o treino de hoje? 💪`
+            }]);
+        }
       } catch (error) {
-        console.error("Erro ao iniciar chat:", error);
+        console.error("Erro Crítico ao iniciar chat:", error);
+        setMessages([{
+            id: 'error',
+            role: 'model',
+            text: "⚠️ Erro ao conectar com o Coach. Verifique sua conexão ou tente novamente mais tarde."
+        }]);
+      } finally {
+        setIsLoading(false); // Libera o input
       }
     };
 
@@ -147,7 +151,18 @@ export const CoachAI: React.FC<CoachAIProps> = ({ user, onClose }) => {
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || !chatSessionRef.current || isLoading) return;
+    
+    // Bloqueia se estiver carregando, vazio ou se a sessão não existir
+    if (!inputText.trim() || isLoading) return;
+    
+    if (!chatSessionRef.current) {
+        setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'model',
+            text: "⚠️ O chat não foi inicializado corretamente. Tente reabrir a janela."
+        }]);
+        return;
+    }
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -193,8 +208,8 @@ export const CoachAI: React.FC<CoachAIProps> = ({ user, onClose }) => {
             <div>
             <h2 className="text-base font-bold text-white leading-tight">Coach Quarteto</h2>
             <p className="text-[10px] text-brand-accent font-medium flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-brand-accent rounded-full animate-pulse"></span>
-                Online
+                <span className={`w-1.5 h-1.5 rounded-full ${isLoading ? 'bg-yellow-500' : 'bg-green-500'} animate-pulse`}></span>
+                {isLoading ? 'Pensando...' : 'Online'}
             </p>
             </div>
         </div>
@@ -234,7 +249,7 @@ export const CoachAI: React.FC<CoachAIProps> = ({ user, onClose }) => {
           </div>
         ))}
         
-        {isLoading && (
+        {isLoading && messages.length > 0 && (
           <div className="flex justify-start">
              <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-600 mr-2 mt-1 shrink-0 bg-slate-800">
                 <img src="https://robohash.org/GYM-COACH-MUSCLE.png?set=set1" alt="Bot" className="w-full h-full object-cover" />
@@ -256,9 +271,10 @@ export const CoachAI: React.FC<CoachAIProps> = ({ user, onClose }) => {
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Pergunte sobre treino..."
-            className="flex-1 bg-slate-900 border border-slate-600 rounded-full px-5 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
+            placeholder={isLoading ? "Coach está digitando..." : "Pergunte sobre treino..."}
+            className="flex-1 bg-slate-900 border border-slate-600 rounded-full px-5 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all disabled:opacity-50"
             disabled={isLoading}
+            autoFocus
             />
             <button
             type="submit"
