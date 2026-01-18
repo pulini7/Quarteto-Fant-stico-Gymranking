@@ -48,9 +48,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: facingMode,
-          // Pede resolução baixa para iniciar rápido e compatível com celulares antigos
-          width: { ideal: 480 }, 
-          height: { ideal: 640 }
+          // HIGH RESOLUTION REQUEST: Tenta 4K, cai para Full HD se não disponível
+          width: { ideal: 3840 }, 
+          height: { ideal: 2160 }
         } 
       });
       
@@ -60,7 +60,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       }
     } catch (err) {
       console.error("Erro na câmera:", err);
-      setCameraError("Não foi possível acessar a câmera. Verifique as permissões.");
+      setCameraError("Não foi possível acessar a câmera em alta resolução.");
     }
   };
 
@@ -79,13 +79,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       
       if (video.readyState !== 4) return; // Wait for video to be ready
 
-      // EXTREME OPTIMIZATION: 300px width max.
-      // Isso cria uma imagem de ~10-15kb. Impossível falhar o upload.
-      const MAX_WIDTH = 300;
-      const scale = video.videoWidth > MAX_WIDTH ? MAX_WIDTH / video.videoWidth : 1;
-      
-      canvas.width = video.videoWidth * scale;
-      canvas.height = video.videoHeight * scale;
+      // EXCELLENT QUALITY: Usa a resolução nativa do vídeo (sem downscale)
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       
       const context = canvas.getContext('2d');
       if (context) {
@@ -95,16 +91,19 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
           context.scale(-1, 1);
         }
         
+        // Desenha na resolução total
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Compressão JPEG 0.3 (Qualidade baixa, mas suficiente para comprovação)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+        // Alta Qualidade: JPEG 0.95 (Qualidade excelente)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
         
         setPreview(dataUrl);
         stopCamera();
 
         // Start AI Analysis em Background
         setAnalyzing(true);
+        // Para a IA, podemos enviar uma versão menor se quisermos economizar tokens, 
+        // mas aqui enviaremos a original pois o usuário quer qualidade máxima.
         analyzeWorkoutImage(dataUrl).then((suggestion) => {
              if (!isMountedRef.current) return; 
              
@@ -173,7 +172,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
       <div className="bg-brand-card w-full max-w-md rounded-3xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
-          <h3 className="text-lg font-bold text-white">Prova de Treino 📸</h3>
+          <h3 className="text-lg font-bold text-white">Prova de Treino (HD) 📸</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
         </div>
 
@@ -215,13 +214,13 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                          <div className="w-12"></div> {/* Spacer para balancear o layout */}
                     </div>
                 </div>
-                <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos.</p>
+                <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos (Alta Resolução).</p>
                 <canvas ref={canvasRef} hidden />
             </div>
           ) : (
             <div className="w-full space-y-4">
                 <div className="relative rounded-xl overflow-hidden border border-slate-600 shadow-lg bg-black">
-                    <img src={preview} alt="Proof" className="w-full h-auto max-h-[25vh] object-contain mx-auto" />
+                    <img src={preview} alt="Proof" className="w-full h-auto max-h-[40vh] object-contain mx-auto" />
                     
                     {/* Botão de Refazer Foto Flutuante */}
                     <button 
@@ -283,7 +282,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             disabled={!preview || isSubmitting}
             className="py-3 text-base shadow-xl flex justify-center items-center gap-2"
           >
-            {isSubmitting ? 'Enviando...' : 'Confirmar Check-in'}
+            {isSubmitting ? 'Enviando (Pode demorar)...' : 'Confirmar Check-in HD'}
           </Button>
         </div>
       </div>

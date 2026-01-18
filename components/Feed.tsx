@@ -161,8 +161,9 @@ const FeedPost = memo(({
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
-            if (file.size > 20 * 1024 * 1024) { // 20MB limit hard check
-                alert("O vídeo é muito grande! Tente um vídeo menor (Max 20MB).");
+            // EXCELLENT QUALITY: Limite aumentado para 150MB para suportar vídeos em alta resolução
+            if (file.size > 150 * 1024 * 1024) { 
+                alert("O vídeo é muito grande! O limite é 150MB.");
                 return;
             }
             onVideoUpload(checkIn.id, file);

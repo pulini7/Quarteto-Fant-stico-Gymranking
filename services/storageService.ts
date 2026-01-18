@@ -443,8 +443,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
 
   // --- CRITICAL FIX: TIMEOUT RACE CONDITION ---
-  // Create a race between Supabase insert and a 5 second timer.
-  // If Supabase hangs (bad network/large payload), the timer wins and throws an error, triggering fallback.
+  // Create a race between Supabase insert and a 60 second timer (High Res = slower upload).
   
   const insertPromise = supabase.from('check_ins').insert({
       id: Date.now().toString(),
@@ -458,7 +457,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   });
 
   const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Supabase Timeout')), 5000);
+      setTimeout(() => reject(new Error('Supabase Timeout')), 60000); // 1 minute timeout for High Res
   });
 
   try {
