@@ -437,25 +437,35 @@ export const Feed: React.FC<FeedProps> = ({ currentUser }) => {
       setUploadingVideoId(checkInId);
       playSound.click();
       
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-          const base64 = reader.result as string;
-          const success = await addVideoToCheckIn(checkInId, base64);
-          if (success) {
-              playSound.success();
-              setFeedData(prev => prev.map(item => {
-                  if (item.checkIn.id === checkInId) {
-                      const existingVideos = item.checkIn.videos || [];
-                      return { ...item, checkIn: { ...item.checkIn, videos: [...existingVideos, base64] } };
-                  }
-                  return item;
-              }));
-          } else {
-              alert("Erro ao salvar vídeo. Tente novamente ou use um arquivo menor.");
-          }
+      try {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+            const base64 = reader.result as string;
+            const success = await addVideoToCheckIn(checkInId, base64);
+            if (success) {
+                playSound.success();
+                setFeedData(prev => prev.map(item => {
+                    if (item.checkIn.id === checkInId) {
+                        const existingVideos = item.checkIn.videos || [];
+                        return { ...item, checkIn: { ...item.checkIn, videos: [...existingVideos, base64] } };
+                    }
+                    return item;
+                }));
+            } else {
+                alert("Erro ao salvar vídeo. O arquivo pode ser muito grande para o banco.");
+            }
+            setUploadingVideoId(null);
+        };
+        reader.onerror = () => {
+            alert("Erro ao ler arquivo.");
+            setUploadingVideoId(null);
+        }
+        reader.readAsDataURL(file);
+      } catch (e) {
+          console.error(e);
           setUploadingVideoId(null);
-      };
-      reader.readAsDataURL(file);
+          alert("Erro crítico ao processar vídeo.");
+      }
   }, []);
 
   return (

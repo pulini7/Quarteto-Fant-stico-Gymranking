@@ -29,7 +29,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
 
   useEffect(() => {
       isMountedRef.current = true;
-      return () => { isMountedRef.current = false; };
+      return () => { 
+          isMountedRef.current = false; 
+          stopCamera();
+      };
   }, []);
 
   // Iniciar câmera ao montar ou mudar o modo (frontal/traseira)
@@ -42,25 +45,32 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   }, [facingMode, preview]);
 
   const startCamera = async () => {
-    stopCamera(); // Garante que a anterior pare antes de iniciar outra
+    stopCamera(); 
     setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: facingMode,
-          // HIGH RESOLUTION REQUEST: Tenta 4K, cai para Full HD se não disponível
-          width: { ideal: 3840 }, 
-          height: { ideal: 2160 }
+          // Solicita Full HD/2K. 4K puro pode travar o navegador mobile em Base64.
+          width: { ideal: 1920 }, 
+          height: { ideal: 1080 }
         } 
       });
       
+      if (!isMountedRef.current) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+      }
+
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
     } catch (err) {
       console.error("Erro na câmera:", err);
-      setCameraError("Não foi possível acessar a câmera em alta resolução.");
+      if (isMountedRef.current) {
+          setCameraError("Não foi possível acessar a câmera em alta resolução.");
+      }
     }
   };
 
@@ -72,52 +82,82 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   };
 
   const takePhoto = async () => {
-    playSound.camera(); // Efeito sonoro de obturador
+    playSound.camera(); 
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       
-      if (video.readyState !== 4) return; // Wait for video to be ready
+      if (video.readyState !== 4) return; 
 
-      // EXCELLENT QUALITY: Usa a resolução nativa do vídeo (sem downscale)
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // --- ALGORITMO DE ALTA QUALIDADE OTIMIZADA ---
+      // 1. Captura resolução nativa
+      let width = video.videoWidth;
+      let height = video.videoHeight;
+
+      // 2. Limita a 2048px (2K) no maior lado para não gerar Base64 > 5MB que falha no banco
+      const MAX_DIMENSION = 2048; 
+      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+          const ratio = width / height;
+          if (width > height) {
+              width = MAX_DIMENSION;
+              height = Math.round(MAX_DIMENSION / ratio);
+          } else {
+              height = MAX_DIMENSION;
+              width = Math.round(MAX_DIMENSION * ratio);
+          }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
       
       const context = canvas.getContext('2d');
       if (context) {
-        // Espelhar horizontalmente se for câmera frontal para parecer um espelho
+        // Espelhar horizontalmente se for câmera frontal
         if (facingMode === 'user') {
           context.translate(canvas.width, 0);
           context.scale(-1, 1);
         }
         
-        // Desenha na resolução total
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        context.drawImage(video, 0, 0, width, height);
         
-        // Alta Qualidade: JPEG 0.95 (Qualidade excelente)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        // JPEG 0.85 é visualmente indistinguível de 1.0 em telas mobile, 
+        // mas o arquivo é 80% menor, garantindo que o upload funcione.
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         
-        setPreview(dataUrl);
-        stopCamera();
+        if (isMountedRef.current) {
+            setPreview(dataUrl);
+            stopCamera();
+            setAnalyzing(true);
+        }
 
-        // Start AI Analysis em Background
-        setAnalyzing(true);
-        // Para a IA, podemos enviar uma versão menor se quisermos economizar tokens, 
-        // mas aqui enviaremos a original pois o usuário quer qualidade máxima.
-        analyzeWorkoutImage(dataUrl).then((suggestion) => {
-             if (!isMountedRef.current) return; 
+        // --- OTIMIZAÇÃO PARA IA ---
+        // Cria uma versão pequena (500px) apenas para a IA analisar rápido
+        // Isso economiza banda e tokens, deixando o app mais rápido
+        const smallCanvas = document.createElement('canvas');
+        const scale = 500 / Math.max(width, height);
+        smallCanvas.width = width * scale;
+        smallCanvas.height = height * scale;
+        const smallCtx = smallCanvas.getContext('2d');
+        if (smallCtx) {
+             smallCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
+             const smallDataUrl = smallCanvas.toDataURL('image/jpeg', 0.6);
              
-             if (suggestion) {
-                 setCaption(prev => {
-                     if (prev.length > 5) return prev; 
-                     return suggestion;
-                 });
-                 if (!isSubmitting) playSound.success(); 
-             }
-             setAnalyzing(false);
-        }).catch(() => {
-            if (isMountedRef.current) setAnalyzing(false);
-        });
+             analyzeWorkoutImage(smallDataUrl).then((suggestion) => {
+                 if (!isMountedRef.current) return; 
+                 if (suggestion) {
+                     setCaption(prev => {
+                         if (prev.length > 5) return prev; 
+                         return suggestion;
+                     });
+                     if (!isSubmitting) playSound.success(); 
+                 }
+                 setAnalyzing(false);
+            }).catch(() => {
+                if (isMountedRef.current) setAnalyzing(false);
+            });
+        } else {
+            setAnalyzing(false);
+        }
       }
     }
   };
@@ -149,20 +189,16 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         playSound.success();
         
         try {
-            // Combina a legenda com as tags selecionadas
             let finalCaption = caption.trim();
             if (selectedTags.length > 0) {
                 const tagsString = selectedTags.map(t => `#${t}`).join(' ');
                 finalCaption = finalCaption ? `${finalCaption}\n\n${tagsString}` : tagsString;
             }
 
-            // Chama a função pai e espera ela resolver
             await onConfirm(preview, finalCaption);
-            
-            // O modal fechará automaticamente via props, mas se falhar, liberamos:
         } catch (error) {
             console.error("Erro no envio:", error);
-            alert("Erro ao enviar. Tente novamente.");
+            alert("Erro ao enviar. A foto pode ser muito grande ou a internet oscilou.");
             setIsSubmitting(false);
         }
     }
@@ -190,11 +226,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                             autoPlay 
                             playsInline 
                             muted
-                            className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`} // Espelha visualmente o vídeo frontal
+                            className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`} 
                         />
                     )}
                     
-                    {/* Controles sobrepostos ao vídeo */}
                     <div className="absolute bottom-6 left-0 right-0 flex justify-center items-center space-x-8">
                         <button 
                             onClick={toggleCamera} 
@@ -211,7 +246,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                             <div className="w-12 h-12 bg-brand-primary rounded-full shadow-inner"></div>
                         </button>
 
-                         <div className="w-12"></div> {/* Spacer para balancear o layout */}
+                         <div className="w-12"></div>
                     </div>
                 </div>
                 <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos (Alta Resolução).</p>
@@ -222,7 +257,6 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                 <div className="relative rounded-xl overflow-hidden border border-slate-600 shadow-lg bg-black">
                     <img src={preview} alt="Proof" className="w-full h-auto max-h-[40vh] object-contain mx-auto" />
                     
-                    {/* Botão de Refazer Foto Flutuante */}
                     <button 
                         onClick={retakePhoto}
                         className="absolute top-2 left-2 bg-black/60 text-white p-1.5 rounded-full backdrop-blur-md"
@@ -282,7 +316,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             disabled={!preview || isSubmitting}
             className="py-3 text-base shadow-xl flex justify-center items-center gap-2"
           >
-            {isSubmitting ? 'Enviando (Pode demorar)...' : 'Confirmar Check-in HD'}
+            {isSubmitting ? 'Enviando...' : 'Confirmar Check-in HD'}
           </Button>
         </div>
       </div>
