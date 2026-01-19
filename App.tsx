@@ -80,16 +80,16 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-brand-dark text-slate-100 flex flex-col font-sans">
-      <div className="flex-1 p-6 pb-24 max-w-lg mx-auto w-full">
+    <div className="min-h-[100dvh] bg-brand-dark text-slate-100 flex flex-col font-sans overflow-hidden">
+      <div className="flex-1 p-4 pb-28 max-w-lg mx-auto w-full overflow-y-auto scrollbar-hide">
         {/* Header Small */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-6 pt-2 sticky top-0 z-30 bg-brand-dark/95 backdrop-blur-sm py-2">
             <h1 className="text-lg font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-brand-primary to-brand-accent leading-none">
                 QUARTETO FANTÁSTICO<br/>GYMRANKING
             </h1>
             <button 
                 onClick={handleLogout} 
-                className="text-xs text-slate-500 hover:text-white transition-colors"
+                className="text-xs text-slate-500 hover:text-white transition-colors bg-slate-800 px-3 py-1 rounded-full"
             >
                 Sair
             </button>
@@ -98,19 +98,19 @@ const App: React.FC = () => {
         {renderContent()}
       </div>
       
-      {/* Floating Chat Button */}
+      {/* Floating Chat Button - Adjusted position for mobile */}
       <button 
         onClick={toggleChat}
-        className="fixed bottom-24 right-4 z-40 w-16 h-16 bg-gradient-to-tr from-slate-700 to-slate-900 rounded-full shadow-[0_0_20px_rgba(59,130,246,0.5)] border-2 border-brand-primary flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-bounce-subtle overflow-hidden p-1"
+        className="fixed bottom-24 right-4 z-40 w-14 h-14 bg-gradient-to-tr from-slate-700 to-slate-900 rounded-full shadow-[0_0_20px_rgba(59,130,246,0.5)] border-2 border-brand-primary flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-bounce-subtle overflow-hidden p-1"
         title="Falar com Coach"
       >
         <img src="https://robohash.org/GYM-COACH-MUSCLE.png?set=set1" alt="Coach Robot" className="w-full h-full object-cover" />
       </button>
 
-      {/* Chat Modal */}
+      {/* Chat Modal - Full screen on mobile */}
       {isChatOpen && (
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setIsChatOpen(false)}>
-            <div className="w-full max-w-lg h-[85vh] sm:h-[600px] bg-brand-card sm:rounded-3xl rounded-t-3xl shadow-2xl border border-slate-700 overflow-hidden flex flex-col animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="w-full sm:max-w-lg h-[90dvh] sm:h-[600px] bg-brand-card sm:rounded-3xl rounded-t-3xl shadow-2xl border border-slate-700 overflow-hidden flex flex-col animate-slide-up" onClick={e => e.stopPropagation()}>
                 <Suspense fallback={<LoadingScreen />}>
                     <CoachAI user={user} onClose={() => setIsChatOpen(false)} />
                 </Suspense>

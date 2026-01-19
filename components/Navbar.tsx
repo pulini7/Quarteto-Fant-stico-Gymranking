@@ -20,7 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSwitch }) => {
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 pb-safe z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 pb-safe z-50 shadow-[0_-5px_20px_rgba(0,0,0,0.3)]">
       <div className="flex justify-around items-center p-2">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
@@ -28,12 +28,14 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSwitch }) => {
             <button
               key={item.id}
               onClick={() => onSwitch(item.id)}
-              className={`flex flex-col items-center justify-center p-3 rounded-xl w-full transition-all ${
-                isActive ? 'text-brand-accent bg-slate-800' : 'text-slate-500 hover:text-slate-300'
+              className={`flex flex-col items-center justify-center p-2 rounded-xl w-full transition-all active:scale-95 touch-manipulation ${
+                isActive ? 'text-brand-accent' : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              {item.icon}
-              <span className="text-xs mt-1 font-medium">{item.label}</span>
+              <div className={`p-1.5 rounded-2xl transition-all ${isActive ? 'bg-slate-800 shadow-inner' : ''}`}>
+                  {item.icon}
+              </div>
+              <span className={`text-[10px] mt-1 font-bold ${isActive ? 'text-brand-accent' : 'text-slate-600'}`}>{item.label}</span>
             </button>
           );
         })}
