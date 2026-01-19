@@ -291,6 +291,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         </div>
       </div>
 
+      {/* --- MOVED CHECK-IN BUTTON HERE FOR VISIBILITY --- */}
+      <div className="py-2">
+        <Button 
+            onClick={() => { playSound.click(); hasCheckedIn ? openProofModal() : setIsCheckInModalOpen(true); }} 
+            disabled={loading || (hasCheckedIn && !todaysCheckIn?.photo)} 
+            fullWidth 
+            className={`py-5 text-lg uppercase tracking-widest shadow-xl border border-white/10 ${!hasCheckedIn ? 'animate-pulse' : ''}`}
+            variant={hasCheckedIn ? 'primary' : 'accent'}
+        >
+            {loading ? 'Processando...' : (hasCheckedIn ? 'Ver Comprovação 📸' : (isWeekend ? 'Fazer Check-in (XP x2) ⚡' : 'Fazer Check-in Agora 📸'))}
+        </Button>
+        {hasCheckedIn && <p className="text-center text-slate-500 text-xs mt-2 animate-fade-in">Treino de hoje pago! Volte amanhã.</p>}
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center transform hover:scale-[1.02] transition-transform">
             <p className="text-brand-accent text-3xl font-black">{user.streak}</p>
@@ -358,19 +372,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
             ))}
         </div>
         <p className="text-center text-[10px] text-slate-600 mt-3 italic">Continue treinando para desbloquear novas conquistas.</p>
-      </div>
-
-      <div className="pt-2 pb-6">
-        <Button 
-            onClick={() => { playSound.click(); hasCheckedIn ? openProofModal() : setIsCheckInModalOpen(true); }} 
-            disabled={loading || (hasCheckedIn && !todaysCheckIn?.photo)} 
-            fullWidth 
-            className={`py-6 text-xl uppercase tracking-widest shadow-xl ${!hasCheckedIn ? 'animate-pulse' : ''}`}
-            variant={hasCheckedIn ? 'primary' : 'accent'}
-        >
-            {loading ? 'Processando...' : (hasCheckedIn ? 'Ver Comprovação 📸' : (isWeekend ? 'Check-in (XP x2) ⚡' : 'Fazer Check-in Agora'))}
-        </Button>
-        {hasCheckedIn && <p className="text-center text-slate-500 text-sm mt-3 animate-fade-in">Treino de hoje pago! Volte amanhã.</p>}
       </div>
     </div>
   );

@@ -51,9 +51,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: facingMode,
-          // Solicita Full HD/2K. 4K puro pode travar o navegador mobile em Base64.
-          width: { ideal: 1920 }, 
-          height: { ideal: 1080 }
+          // RESOLUÇÃO SEGURA: 1280x720 (HD). 
+          // 4K/2K gera strings base64 gigantes que falham no upload em 3G/4G.
+          width: { ideal: 1280 }, 
+          height: { ideal: 720 }
         } 
       });
       
@@ -69,7 +70,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     } catch (err) {
       console.error("Erro na câmera:", err);
       if (isMountedRef.current) {
-          setCameraError("Não foi possível acessar a câmera em alta resolução.");
+          setCameraError("Não foi possível acessar a câmera. Verifique as permissões.");
       }
     }
   };
@@ -81,21 +82,17 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     }
   };
 
-  const takePhoto = async () => {
-    playSound.camera(); 
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
+  const processImage = (source: CanvasImageSource, sourceWidth: number, sourceHeight: number) => {
       const canvas = canvasRef.current;
-      
-      if (video.readyState !== 4) return; 
+      if (!canvas) return;
 
-      // --- ALGORITMO DE ALTA QUALIDADE OTIMIZADA ---
-      // 1. Captura resolução nativa
-      let width = video.videoWidth;
-      let height = video.videoHeight;
+      // --- OTIMIZAÇÃO DE ESTABILIDADE ---
+      // Reduz para Max 1024px. Isso gera arquivos de ~150KB (super rápido).
+      // Antes estava 2048px (~2MB), o que causava falhas.
+      const MAX_DIMENSION = 1024; 
+      let width = sourceWidth;
+      let height = sourceHeight;
 
-      // 2. Limita a 2048px (2K) no maior lado para não gerar Base64 > 5MB que falha no banco
-      const MAX_DIMENSION = 2048; 
       if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
           const ratio = width / height;
           if (width > height) {
@@ -112,17 +109,16 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       
       const context = canvas.getContext('2d');
       if (context) {
-        // Espelhar horizontalmente se for câmera frontal
-        if (facingMode === 'user') {
+        // Espelhar horizontalmente se for câmera frontal (apenas se for video)
+        if (source instanceof HTMLVideoElement && facingMode === 'user') {
           context.translate(canvas.width, 0);
           context.scale(-1, 1);
         }
         
-        context.drawImage(video, 0, 0, width, height);
+        context.drawImage(source, 0, 0, width, height);
         
-        // JPEG 0.85 é visualmente indistinguível de 1.0 em telas mobile, 
-        // mas o arquivo é 80% menor, garantindo que o upload funcione.
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        // Qualidade 0.6 é o "sweet spot" entre visual bom no celular e upload instantâneo.
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.60);
         
         if (isMountedRef.current) {
             setPreview(dataUrl);
@@ -130,9 +126,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             setAnalyzing(true);
         }
 
-        // --- OTIMIZAÇÃO PARA IA ---
-        // Cria uma versão pequena (500px) apenas para a IA analisar rápido
-        // Isso economiza banda e tokens, deixando o app mais rápido
+        // Analisar imagem (Versão ainda menor para a IA ser rápida)
         const smallCanvas = document.createElement('canvas');
         const scale = 500 / Math.max(width, height);
         smallCanvas.width = width * scale;
@@ -140,7 +134,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         const smallCtx = smallCanvas.getContext('2d');
         if (smallCtx) {
              smallCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
-             const smallDataUrl = smallCanvas.toDataURL('image/jpeg', 0.6);
+             const smallDataUrl = smallCanvas.toDataURL('image/jpeg', 0.5);
              
              analyzeWorkoutImage(smallDataUrl).then((suggestion) => {
                  if (!isMountedRef.current) return; 
@@ -159,7 +153,30 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             setAnalyzing(false);
         }
       }
+  };
+
+  const takePhoto = async () => {
+    playSound.camera(); 
+    if (videoRef.current) {
+      const video = videoRef.current;
+      if (video.readyState !== 4) return;
+      processImage(video, video.videoWidth, video.videoHeight);
     }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                  processImage(img, img.width, img.height);
+              };
+              img.src = event.target?.result as string;
+          };
+          reader.readAsDataURL(file);
+      }
   };
 
   const retakePhoto = () => {
@@ -198,7 +215,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             await onConfirm(preview, finalCaption);
         } catch (error) {
             console.error("Erro no envio:", error);
-            alert("Erro ao enviar. A foto pode ser muito grande ou a internet oscilou.");
+            alert("Erro ao enviar. Tente novamente.");
             setIsSubmitting(false);
         }
     }
@@ -208,7 +225,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
       <div className="bg-brand-card w-full max-w-md rounded-3xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
-          <h3 className="text-lg font-bold text-white">Prova de Treino (HD) 📸</h3>
+          <h3 className="text-lg font-bold text-white">Novo Check-in 📸</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
         </div>
 
@@ -217,8 +234,13 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             <div className="w-full flex flex-col items-center space-y-4">
                 <div className="relative w-full aspect-[3/4] bg-black rounded-2xl overflow-hidden shadow-lg border-2 border-slate-700">
                     {cameraError ? (
-                        <div className="absolute inset-0 flex items-center justify-center text-center p-4 text-brand-danger">
-                            {cameraError}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                            <div className="text-brand-danger font-bold">{cameraError}</div>
+                            <p className="text-slate-400 text-sm">Sem problemas! Você pode enviar uma foto da galeria.</p>
+                            <label className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors shadow-lg border border-slate-500">
+                                📂 Escolher Foto
+                                <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+                            </label>
                         </div>
                     ) : (
                         <video 
@@ -230,26 +252,32 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
                         />
                     )}
                     
-                    <div className="absolute bottom-6 left-0 right-0 flex justify-center items-center space-x-8">
-                        <button 
-                            onClick={toggleCamera} 
-                            className="p-3 bg-slate-800/60 backdrop-blur text-white rounded-full hover:bg-slate-700/80 transition-all active:scale-95 border border-white/10"
-                            title="Trocar Câmera"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0-4.418-3.582-8-8-8S4 5.582 4 10"/><path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8"/><path d="M10 2 8 4h4Z"/><path d="m14 22 2-2h-4Z"/></svg>
-                        </button>
+                    {!cameraError && (
+                        <div className="absolute bottom-6 left-0 right-0 flex justify-center items-center space-x-8">
+                            <button 
+                                onClick={toggleCamera} 
+                                className="p-3 bg-slate-800/60 backdrop-blur text-white rounded-full hover:bg-slate-700/80 transition-all active:scale-95 border border-white/10"
+                                title="Trocar Câmera"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0-4.418-3.582-8-8-8S4 5.582 4 10"/><path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8"/><path d="M10 2 8 4h4Z"/><path d="m14 22 2-2h-4Z"/></svg>
+                            </button>
 
-                        <button 
-                            onClick={takePhoto} 
-                            className="w-16 h-16 rounded-full border-4 border-white bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all active:scale-90 shadow-lg"
-                        >
-                            <div className="w-12 h-12 bg-brand-primary rounded-full shadow-inner"></div>
-                        </button>
+                            <button 
+                                onClick={takePhoto} 
+                                className="w-16 h-16 rounded-full border-4 border-white bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all active:scale-90 shadow-lg"
+                            >
+                                <div className="w-12 h-12 bg-brand-primary rounded-full shadow-inner"></div>
+                            </button>
 
-                         <div className="w-12"></div>
-                    </div>
+                            {/* Fallback discreto para upload mesmo se câmera funcionar */}
+                            <label className="p-3 bg-slate-800/60 backdrop-blur text-white rounded-full hover:bg-slate-700/80 transition-all active:scale-95 border border-white/10 cursor-pointer">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                                <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+                            </label>
+                        </div>
+                    )}
                 </div>
-                <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos (Alta Resolução).</p>
+                <p className="text-xs text-slate-500 text-center">Tire uma foto sua ou dos equipamentos.</p>
                 <canvas ref={canvasRef} hidden />
             </div>
           ) : (
@@ -316,7 +344,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
             disabled={!preview || isSubmitting}
             className="py-3 text-base shadow-xl flex justify-center items-center gap-2"
           >
-            {isSubmitting ? 'Enviando...' : 'Confirmar Check-in HD'}
+            {isSubmitting ? 'Enviando...' : 'Confirmar Check-in'}
           </Button>
         </div>
       </div>
