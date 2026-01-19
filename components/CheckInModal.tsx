@@ -221,7 +221,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md animate-fade-in md:p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md animate-fade-in md:p-4">
       <div className="bg-brand-card w-full max-w-md h-full md:h-auto md:max-h-[90vh] md:rounded-3xl border-0 md:border border-slate-700 shadow-2xl overflow-hidden flex flex-col relative">
         <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0 bg-brand-card z-10">
           <h3 className="text-lg font-bold text-white">Novo Check-in 📸</h3>
