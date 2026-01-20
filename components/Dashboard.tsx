@@ -305,11 +305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         {hasCheckedIn && <p className="text-center text-slate-500 text-xs mt-2 animate-fade-in">Treino de hoje pago! Volte amanhã.</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center transform hover:scale-[1.02] transition-transform">
-            <p className="text-brand-accent text-3xl font-black">{user.streak}</p>
-            <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">Dias Streak</p>
-        </div>
+      <div className="grid grid-cols-1 gap-4">
         <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center transform hover:scale-[1.02] transition-transform">
             <p className="text-brand-primary text-3xl font-black">{user.checkIns.length}</p>
             <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">Total Treinos</p>

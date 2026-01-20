@@ -24,12 +24,12 @@ export const Leaderboard: React.FC = () => {
   }, []);
 
   const handleGlobalReset = async () => {
-    if (window.confirm("ATENÇÃO: Isso zerará a pontuação de TODOS os usuários para 0! Os check-ins serão mantidos. Tem certeza?")) {
+    if (window.confirm("ATENÇÃO: Isso zerará a pontuação E OS STREAKS de TODOS os usuários! Os check-ins (histórico) serão mantidos. Tem certeza?")) {
         setResetting(true);
         await resetGlobalRanking();
         await loadUsers(); // Reload to show 0
         setResetting(false);
-        alert("Ranking zerado com sucesso!");
+        alert("Ranking e Streaks zerados com sucesso!");
     }
   };
 
@@ -172,7 +172,6 @@ export const Leaderboard: React.FC = () => {
                         <div className="flex justify-between items-center pr-2">
                              <div>
                                 <h3 className={`font-bold text-base leading-tight ${isTop3 ? 'text-white' : 'text-slate-300'}`}>{u.name}</h3>
-                                {u.streak > 0 && <div className="flex items-center gap-1 mt-1 text-xs text-brand-accent/80 font-medium">🔥 Streak: {u.streak}</div>}
                              </div>
                              <div className="flex items-center gap-4">
                                 <div className="text-right flex flex-col items-end">

@@ -109,12 +109,12 @@ const mapUserFromDB = (dbUser: any): User => ({
 // --- Core Functions ---
 
 export const resetGlobalRanking = async (): Promise<void> => {
-    // Reseta o score de TODOS os usuários para 0 no Supabase
-    await supabase.from('users').update({ score: 0 }).neq('id', '0'); // neq id 0 é um hack para dar update all sem where
+    // Reseta o score E O STREAK de TODOS os usuários para 0 no Supabase
+    await supabase.from('users').update({ score: 0, streak: 0 }).neq('id', '0'); 
 
     // Reseta local também para refletir na hora
     const db = getLocalDB();
-    db.users.forEach((u: any) => u.score = 0);
+    db.users.forEach((u: any) => { u.score = 0; u.streak = 0; });
     saveLocalDB(db);
 };
 
