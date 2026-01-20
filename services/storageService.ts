@@ -108,6 +108,16 @@ const mapUserFromDB = (dbUser: any): User => ({
 
 // --- Core Functions ---
 
+export const resetGlobalRanking = async (): Promise<void> => {
+    // Reseta o score de TODOS os usuários para 0 no Supabase
+    await supabase.from('users').update({ score: 0 }).neq('id', '0'); // neq id 0 é um hack para dar update all sem where
+
+    // Reseta local também para refletir na hora
+    const db = getLocalDB();
+    db.users.forEach((u: any) => u.score = 0);
+    saveLocalDB(db);
+};
+
 export const resetUserByName = async (name: string): Promise<boolean> => {
     const db = getLocalDB();
     const localUserIndex = db.users.findIndex((u: any) => u.name.toLowerCase() === name.toLowerCase());
@@ -368,7 +378,9 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       const hasYesterday = userCheckIns.some((c: any) => c.date === yesterdayStr);
       let newStreak = 1;
       if (hasYesterday) newStreak = user.streak + 1;
-      const pointsEarned = isWeekend(today) ? 20 : 10;
+      
+      // NOVA LÓGICA: 1 Ponto por Check-in
+      const pointsEarned = 1;
       const newScore = user.score + pointsEarned;
 
       const newCheckIn = {
@@ -394,7 +406,8 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       if (hasCheckInYesterday) {
           newStreak = currentStreak + 1;
       }
-      const pointsEarned = isWeekend(today) ? 20 : 10;
+      // NOVA LÓGICA: 1 Ponto por Check-in
+      const pointsEarned = 1;
       const newScore = currentScore + pointsEarned;
       return { newScore, newStreak };
   };
@@ -443,10 +456,6 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
 
   // --- CRITICAL FIX: TIMEOUT RACE CONDITION & COMPATIBILITY ---
-  
-  // NOTE: 'videos' field removed from initial insert. 
-  // If the 'videos' column doesn't exist in Supabase (missing migration), sending [] crashes the insert.
-  // DB default will handle it if the column exists.
   
   const insertPromise = supabase.from('check_ins').insert({
       id: Date.now().toString(),

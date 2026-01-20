@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { getLeaderboardData, isWeekend } from '../services/storageService';
+import { getLeaderboardData, isWeekend, resetGlobalRanking } from '../services/storageService';
 import { User } from '../types';
+import { Button } from './Button';
 
 type Timeframe = 'WEEK' | 'MONTH' | 'YEAR';
 
@@ -8,17 +9,29 @@ export const Leaderboard: React.FC = () => {
   const [timeframe, setTimeframe] = useState<Timeframe>('WEEK');
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
+
+  const loadUsers = async () => {
+    setLoading(true);
+    // OPTIMIZATION: Uses data without base64 photos
+    const data = await getLeaderboardData();
+    setUsers(data);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const loadUsers = async () => {
-        setLoading(true);
-        // OPTIMIZATION: Uses data without base64 photos
-        const data = await getLeaderboardData();
-        setUsers(data);
-        setLoading(false);
-    };
     loadUsers();
   }, []);
+
+  const handleGlobalReset = async () => {
+    if (window.confirm("ATENÇÃO: Isso zerará a pontuação de TODOS os usuários para 0! Os check-ins serão mantidos. Tem certeza?")) {
+        setResetting(true);
+        await resetGlobalRanking();
+        await loadUsers(); // Reload to show 0
+        setResetting(false);
+        alert("Ranking zerado com sucesso!");
+    }
+  };
 
   const getStartDate = (frame: Timeframe): Date => {
     const now = new Date();
@@ -45,10 +58,8 @@ export const Leaderboard: React.FC = () => {
       return checkInDate >= start;
     });
 
-    const score = validCheckIns.reduce((acc, curr) => {
-      const points = isWeekend(curr.date) ? 20 : 10;
-      return acc + points;
-    }, 0);
+    // Simples: 1 Checkin = 1 Ponto
+    const score = validCheckIns.length; 
 
     return {
       score,
@@ -62,6 +73,8 @@ export const Leaderboard: React.FC = () => {
     return users
       .map(u => {
         const stats = calculatePeriodStats(u, startDate);
+        // Se quisermos usar o score global do banco (que agora é 1 ponto por checkin desde o reset), usamos u.score
+        // Mas para filtros de tempo (Semana/Mês), usamos o calculado dinamicamente
         return {
           ...u,
           periodScore: stats.score,
@@ -108,7 +121,7 @@ export const Leaderboard: React.FC = () => {
                     <h3 className="text-xl font-bold text-white leading-tight">{athleteOfTheWeek.name}</h3>
                     <p className="text-yellow-500 font-medium text-sm mb-2">Dominando o Ranking!</p>
                     <div className="flex items-center gap-3 text-xs text-slate-400">
-                        <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700">⚡ {athleteOfTheWeek.periodScore} XP</span>
+                        <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700">⚡ {athleteOfTheWeek.periodScore} Pts</span>
                         <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700">🏋️ {athleteOfTheWeek.periodCount} Treinos</span>
                     </div>
                 </div>
@@ -169,7 +182,7 @@ export const Leaderboard: React.FC = () => {
                                 <div className="w-px h-6 bg-slate-700"></div>
                                 <div className="text-right flex flex-col items-end min-w-[3rem]">
                                     <span className={`text-xl font-black leading-none ${isTop3 ? 'text-white' : 'text-slate-500'}`}>{score}</span>
-                                    <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">XP</span>
+                                    <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">Pts</span>
                                 </div>
                              </div>
                         </div>
@@ -180,6 +193,17 @@ export const Leaderboard: React.FC = () => {
         {leaderboardData.every(u => u.periodScore === 0) && (
             <div className="text-center py-8 opacity-50"><p>Nenhum treino registrado neste período.</p></div>
         )}
+      </div>
+
+      <div className="pt-8 border-t border-slate-800 mt-8 text-center">
+          <Button 
+            onClick={handleGlobalReset} 
+            variant="secondary" 
+            className="text-xs bg-red-900/20 text-red-400 hover:bg-red-900 hover:text-white border-red-900/50"
+            disabled={resetting}
+          >
+            {resetting ? 'Resetando...' : '⚠️ Resetar Ranking (Admin)'}
+          </Button>
       </div>
     </div>
   );
