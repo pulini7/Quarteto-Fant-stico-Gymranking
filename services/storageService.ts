@@ -146,11 +146,24 @@ export const resetUserByName = async (name: string): Promise<boolean> => {
 };
 
 export const getUsersLight = async (): Promise<User[]> => {
-    const { data, error } = await supabase
+    // TENTA buscar com weekly_plan. Se falhar (coluna não existe), tenta sem.
+    let { data, error } = await supabase
         .from('users')
         .select('id, name, avatar_seed, custom_avatar, password, streak, score, weekly_plan'); 
 
+    if (error) {
+        // Fallback robusto: se a coluna weekly_plan não existir, busca sem ela para não quebrar o app
+        console.warn("Recovering from Supabase error (likely missing column):", error.message);
+        const retry = await supabase
+            .from('users')
+            .select('id, name, avatar_seed, custom_avatar, password, streak, score');
+        
+        data = retry.data;
+        error = retry.error;
+    }
+
     if (error || !data) {
+        // Se ainda assim der erro, vai pro fallback local (mas aí perde fotos se não estiverem locais)
         return getUsers();
     }
     
@@ -190,7 +203,8 @@ export const getLeaderboardData = async (): Promise<User[]> => {
 }
 
 export const getUsers = async (): Promise<User[]> => {
-  const { data, error } = await supabase
+  // Mesmo fallback para a query pesada
+  let query = supabase
     .from('users')
     .select(`
       id, name, avatar_seed, custom_avatar, score, streak, weekly_plan,
@@ -200,6 +214,24 @@ export const getUsers = async (): Promise<User[]> => {
       )
     `)
     .order('score', { ascending: false });
+
+  let { data, error } = await query;
+
+  if (error) {
+      console.warn("Retrying getUsers without weekly_plan...");
+      const retry = await supabase
+        .from('users')
+        .select(`
+          id, name, avatar_seed, custom_avatar, score, streak,
+          check_ins (
+            *,
+            comments (*)
+          )
+        `)
+        .order('score', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+  }
 
   let users: User[] = [];
 
@@ -256,13 +288,20 @@ export const saveUser = async (user: User): Promise<void> => {
     // SANDBOX: Se for o usuário de teste, não salva nada
     if (user.name === TEST_USER_EMAIL) return;
 
+    // Tenta salvar com weekly_plan
     const { error } = await supabase.from('users').update({
         custom_avatar: user.customAvatar,
         password: user.password,
-        weekly_plan: user.weeklyPlan // Save weekly plan
+        weekly_plan: user.weeklyPlan
     }).eq('id', user.id);
 
+    // Se der erro (provavelmente coluna faltando), tenta salvar sem
     if (error) {
+        await supabase.from('users').update({
+            custom_avatar: user.customAvatar,
+            password: user.password
+        }).eq('id', user.id);
+        
         const db = getLocalDB();
         const index = db.users.findIndex((u: any) => u.id === user.id);
         if (index !== -1) {
