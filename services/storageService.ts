@@ -48,10 +48,10 @@ const getLocalDB = () => {
     
     const initial = {
         users: [
-             { id: '1', name: 'Aline', avatar_seed: 501, score: 0, streak: 0, custom_avatar: null, password: null },
-             { id: '2', name: 'Samila', avatar_seed: 502, score: 0, streak: 0, custom_avatar: null, password: null },
-             { id: '3', name: 'Pâmela', avatar_seed: 503, score: 0, streak: 0, custom_avatar: null, password: null },
-             { id: '4', name: 'Taís', avatar_seed: 504, score: 0, streak: 0, custom_avatar: null, password: null }
+             { id: '1', name: 'Aline', avatar_seed: 501, score: 0, streak: 0, custom_avatar: null, password: null, weekly_plan: {} },
+             { id: '2', name: 'Samila', avatar_seed: 502, score: 0, streak: 0, custom_avatar: null, password: null, weekly_plan: {} },
+             { id: '3', name: 'Pâmela', avatar_seed: 503, score: 0, streak: 0, custom_avatar: null, password: null, weekly_plan: {} },
+             { id: '4', name: 'Taís', avatar_seed: 504, score: 0, streak: 0, custom_avatar: null, password: null, weekly_plan: {} }
         ],
         check_ins: [],
         comments: [],
@@ -102,6 +102,7 @@ const mapUserFromDB = (dbUser: any): User => ({
   score: dbUser.score,
   streak: dbUser.streak,
   password: dbUser.password,
+  weeklyPlan: dbUser.weekly_plan || {},
   checkIns: dbUser.check_ins ? dbUser.check_ins.map(mapCheckInFromDB) : [],
   notifications: dbUser.notifications ? dbUser.notifications.map(mapNotificationFromDB) : []
 });
@@ -147,7 +148,7 @@ export const resetUserByName = async (name: string): Promise<boolean> => {
 export const getUsersLight = async (): Promise<User[]> => {
     const { data, error } = await supabase
         .from('users')
-        .select('id, name, avatar_seed, custom_avatar, password, streak, score'); 
+        .select('id, name, avatar_seed, custom_avatar, password, streak, score, weekly_plan'); 
 
     if (error || !data) {
         return getUsers();
@@ -161,6 +162,7 @@ export const getUsersLight = async (): Promise<User[]> => {
         password: u.password,
         streak: u.streak,
         score: u.score,
+        weeklyPlan: u.weekly_plan || {},
         checkIns: [],
         notifications: []
     }));
@@ -191,7 +193,7 @@ export const getUsers = async (): Promise<User[]> => {
   const { data, error } = await supabase
     .from('users')
     .select(`
-      id, name, avatar_seed, custom_avatar, score, streak,
+      id, name, avatar_seed, custom_avatar, score, streak, weekly_plan,
       check_ins (
         *,
         comments (*)
@@ -256,7 +258,8 @@ export const saveUser = async (user: User): Promise<void> => {
 
     const { error } = await supabase.from('users').update({
         custom_avatar: user.customAvatar,
-        password: user.password
+        password: user.password,
+        weekly_plan: user.weeklyPlan // Save weekly plan
     }).eq('id', user.id);
 
     if (error) {
@@ -265,6 +268,7 @@ export const saveUser = async (user: User): Promise<void> => {
         if (index !== -1) {
             db.users[index].custom_avatar = user.customAvatar;
             db.users[index].password = user.password;
+            db.users[index].weekly_plan = user.weeklyPlan;
             saveLocalDB(db);
         }
     }
@@ -304,7 +308,8 @@ export const loginOrCreateUser = async (name: string): Promise<User> => {
     name: name,
     avatar_seed: Math.floor(Math.random() * 1000),
     score: 0,
-    streak: 0
+    streak: 0,
+    weekly_plan: {}
   };
 
   const { data: created, error: createError } = await supabase

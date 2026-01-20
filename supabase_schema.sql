@@ -8,8 +8,18 @@ create table if not exists public.users (
     custom_avatar text,
     score int default 0,
     streak int default 0,
-    password text
+    password text,
+    weekly_plan jsonb default '{}'::jsonb
 );
+
+-- Migração segura: Adiciona coluna weekly_plan se não existir
+do $$
+begin
+    if not exists (select 1 from information_schema.columns where table_name = 'users' and column_name = 'weekly_plan') then
+        alter table public.users add column weekly_plan jsonb default '{}'::jsonb;
+    end if;
+end
+$$;
 
 create table if not exists public.check_ins (
     id text primary key,

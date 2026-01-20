@@ -25,6 +25,10 @@ export interface CheckIn {
   caption?: string; // Optional caption/phrase
 }
 
+export interface WeeklyPlan {
+  [key: string]: string; // "Domingo": "Descanso", "Segunda": "Peito", etc.
+}
+
 export interface User {
   id: string;
   name: string;
@@ -32,10 +36,11 @@ export interface User {
   customAvatar?: string; // Base64 string for custom or AI generated avatar
   checkIns: CheckIn[]; 
   streak: number;
-  score: number; // XP System: 10pts weekday, 20pts weekend
+  score: number; // XP System
   password?: string; // Simple authentication
   notifications?: Notification[]; // For provocations
   isAdmin?: boolean; // Admin privilege flag
+  weeklyPlan?: WeeklyPlan; // New field for weekly planning
 }
 
 export interface UserStats {

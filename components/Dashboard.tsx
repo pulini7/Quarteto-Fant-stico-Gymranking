@@ -7,6 +7,7 @@ import { Confetti } from './Confetti';
 import { AvatarModal } from './AvatarModal';
 import { CheckInModal } from './CheckInModal';
 import { GoatMascot, GoatMood } from './GoatMascot';
+import { WeeklyPlan } from './WeeklyPlan';
 
 interface DashboardProps {
   user: User;
@@ -304,6 +305,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         </Button>
         {hasCheckedIn && <p className="text-center text-slate-500 text-xs mt-2 animate-fade-in">Treino de hoje pago! Volte amanhã.</p>}
       </div>
+
+      {/* --- WEEKLY PLAN --- */}
+      <WeeklyPlan 
+         user={user} 
+         onUpdateUser={onUpdateUser} 
+         onTriggerCheckIn={() => { playSound.click(); setIsCheckInModalOpen(true); }}
+      />
 
       <div className="grid grid-cols-1 gap-4">
         <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 text-center transform hover:scale-[1.02] transition-transform">

@@ -148,24 +148,29 @@ export const Leaderboard: React.FC = () => {
 
       <div className="space-y-3">
         {leaderboardData.map((u, index) => {
-            const isTop3 = index < 3;
             const score = u.periodScore; 
             const count = u.periodCount; 
+            
+            // LÓGICA DE EMPATE TÉCNICO:
+            // Procura o índice do primeiro usuário com a mesma pontuação e contagem
+            const effectiveRank = leaderboardData.findIndex(p => p.periodScore === score && p.periodCount === count) + 1;
+            const isTop3 = effectiveRank <= 3;
+
             let rankColor = "text-slate-500";
             let borderColor = "border-slate-800";
             let icon = null;
 
-            if (index === 0) { rankColor = "text-yellow-400"; borderColor = "border-yellow-500/50"; icon = "👑"; } 
-            else if (index === 1) { rankColor = "text-slate-300"; borderColor = "border-slate-500/50"; icon = "🥈"; } 
-            else if (index === 2) { rankColor = "text-amber-700"; borderColor = "border-amber-700/50"; icon = "🥉"; }
+            if (effectiveRank === 1) { rankColor = "text-yellow-400"; borderColor = "border-yellow-500/50"; icon = "👑"; } 
+            else if (effectiveRank === 2) { rankColor = "text-slate-300"; borderColor = "border-slate-500/50"; icon = "🥈"; } 
+            else if (effectiveRank === 3) { rankColor = "text-amber-700"; borderColor = "border-amber-700/50"; icon = "🥉"; }
 
             return (
                 <div key={u.id} className={`flex items-center p-4 rounded-2xl border transition-all duration-300 ${isTop3 ? `bg-slate-800/80 ${borderColor} shadow-lg` : 'bg-transparent border-slate-800 hover:bg-slate-800/30'}`}>
                     <div className={`w-8 font-black text-xl mr-3 text-center flex flex-col items-center justify-center ${rankColor}`}>
-                        <span>{index + 1}</span>
+                        <span>{effectiveRank}</span>
                     </div>
                     <div className="relative mr-4">
-                        <img src={u.customAvatar || `https://picsum.photos/seed/${u.avatarSeed}/100`} className={`w-12 h-12 rounded-full object-cover bg-slate-700 border-2 ${index === 0 ? 'border-yellow-400' : 'border-slate-600'}`} alt={u.name} loading="lazy" />
+                        <img src={u.customAvatar || `https://picsum.photos/seed/${u.avatarSeed}/100`} className={`w-12 h-12 rounded-full object-cover bg-slate-700 border-2 ${effectiveRank === 1 ? 'border-yellow-400' : 'border-slate-600'}`} alt={u.name} loading="lazy" />
                         {icon && <div className="absolute -top-2 -right-1 text-base shadow-sm">{icon}</div>}
                     </div>
                     <div className="flex-1">
