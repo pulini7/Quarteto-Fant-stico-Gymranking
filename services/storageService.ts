@@ -442,8 +442,11 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
   const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
 
-  // --- CRITICAL FIX: TIMEOUT RACE CONDITION ---
-  // Create a race between Supabase insert and a 60 second timer (High Res = slower upload).
+  // --- CRITICAL FIX: TIMEOUT RACE CONDITION & COMPATIBILITY ---
+  
+  // NOTE: 'videos' field removed from initial insert. 
+  // If the 'videos' column doesn't exist in Supabase (missing migration), sending [] crashes the insert.
+  // DB default will handle it if the column exists.
   
   const insertPromise = supabase.from('check_ins').insert({
       id: Date.now().toString(),
@@ -451,13 +454,13 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       date: today,
       timestamp: new Date().toISOString(),
       photo: photoBase64, 
-      videos: [],
       caption: caption,
       likes: []
   });
 
   const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Supabase Timeout')), 60000); // 1 minute timeout for High Res
+      // Increased timeout to 120s for safer mobile uploads
+      setTimeout(() => reject(new Error('Supabase Timeout')), 120000); 
   });
 
   try {

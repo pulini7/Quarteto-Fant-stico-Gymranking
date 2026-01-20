@@ -52,7 +52,6 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         video: { 
           facingMode: facingMode,
           // RESOLUÇÃO SEGURA: 1280x720 (HD). 
-          // 4K/2K gera strings base64 gigantes que falham no upload em 3G/4G.
           width: { ideal: 1280 }, 
           height: { ideal: 720 }
         } 
@@ -86,9 +85,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      // --- OTIMIZAÇÃO DE ESTABILIDADE ---
-      // Reduz para Max 1024px. Isso gera arquivos de ~150KB (super rápido).
-      const MAX_DIMENSION = 1024; 
+      // --- OTIMIZAÇÃO CRÍTICA DE UPLOAD ---
+      // Reduz para Max 800px. Isso gera arquivos de ~80KB, garantindo upload rápido e sucesso no Supabase.
+      const MAX_DIMENSION = 800; 
       let width = sourceWidth;
       let height = sourceHeight;
 
@@ -116,8 +115,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
         
         context.drawImage(source, 0, 0, width, height);
         
-        // Qualidade 0.6 é o "sweet spot" entre visual bom no celular e upload instantâneo.
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.60);
+        // Qualidade 0.5 é ideal para mobile (boa visualização, arquivo leve)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
         
         if (isMountedRef.current) {
             setPreview(dataUrl);
@@ -127,7 +126,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
 
         // Analisar imagem (Versão ainda menor para a IA ser rápida)
         const smallCanvas = document.createElement('canvas');
-        const scale = 500 / Math.max(width, height);
+        const scale = 300 / Math.max(width, height);
         smallCanvas.width = width * scale;
         smallCanvas.height = height * scale;
         const smallCtx = smallCanvas.getContext('2d');
