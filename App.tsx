@@ -46,10 +46,11 @@ const App: React.FC = () => {
       setUser(null);
   };
 
-  // Loading Fallback Component
+  // Loading Fallback Component Enhanced
   const LoadingScreen = () => (
-    <div className="flex items-center justify-center h-64 animate-pulse">
-        <div className="text-brand-primary font-bold text-lg">Carregando...</div>
+    <div className="flex flex-col items-center justify-center h-80 space-y-4">
+        <div className="gym-loader"></div>
+        <div className="text-slate-500 font-bold text-xs uppercase tracking-widest animate-pulse">Carregando...</div>
     </div>
   );
 
