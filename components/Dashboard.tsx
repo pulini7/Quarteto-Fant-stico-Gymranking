@@ -158,9 +158,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
     }
   };
 
-  const handleCheckInComplete = async (photoBase64: string, caption: string) => {
+  const handleCheckInComplete = async (photoBase64: string, caption: string, videoBase64?: string) => {
     setLoading(true);
-    const updated = await performCheckIn(user.id, photoBase64, caption);
+    // Agora passa o vídeo opcional também
+    const updated = await performCheckIn(user.id, photoBase64, caption, videoBase64);
     
     if (updated) {
         playSound.success();

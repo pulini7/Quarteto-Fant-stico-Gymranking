@@ -1,9 +1,13 @@
 import { User, CheckIn, Comment, Notification } from '../types';
 import { supabase } from './supabaseClient';
 
-// Helper to get today's date string YYYY-MM-DD
+// Helper to get today's date string YYYY-MM-DD in LOCAL TIME
 export const getTodayString = (): string => {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 // Helper to check if a date string is Saturday (6) or Sunday (0)
@@ -399,16 +403,21 @@ const processProvocations = async (userId: string, userName: string, oldScore: n
     }
 };
 
-export const performCheckIn = async (userId: string, photoBase64: string, caption: string = ''): Promise<User | null> => {
+export const performCheckIn = async (userId: string, photoBase64: string, caption: string = '', videoBase64?: string): Promise<User | null> => {
   cleanupExpiredTestCheckIns();
 
   const today = getTodayString();
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  
+  // Create yesterday string using LOCAL time logic to avoid UTC offset issues
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const yYear = d.getFullYear();
+  const yMonth = String(d.getMonth() + 1).padStart(2, '0');
+  const yDay = String(d.getDate()).padStart(2, '0');
+  const yesterdayStr = `${yYear}-${yMonth}-${yDay}`;
 
   // Logic to save local
-  const saveToLocalFallback = async (fallbackUserId: string, fallbackPhoto: string, fallbackCaption: string) => {
+  const saveToLocalFallback = async (fallbackUserId: string, fallbackPhoto: string, fallbackCaption: string, fallbackVideo?: string) => {
       console.log("TIMEOUT or ERROR: Saving checkin to local storage fallback");
       const db = getLocalDB();
       const user = db.users.find((u: any) => u.id === fallbackUserId);
@@ -433,7 +442,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
           date: today,
           timestamp: new Date().toISOString(),
           photo: fallbackPhoto,
-          videos: [],
+          videos: fallbackVideo ? [fallbackVideo] : [],
           caption: fallbackCaption,
           likes: []
       };
@@ -459,7 +468,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
   
   if (fetchError || !userDB) {
-      return await saveToLocalFallback(userId, photoBase64, caption);
+      return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
   }
 
   // --- SANDBOX MODE FOR TEST USER ---
@@ -479,7 +488,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
           date: today,
           timestamp: new Date().toISOString(),
           photo: photoBase64,
-          videos: [],
+          videos: videoBase64 ? [videoBase64] : [],
           likes: [],
           caption: caption,
           comments: []
@@ -501,15 +510,18 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 
   // --- CRITICAL FIX: TIMEOUT RACE CONDITION & COMPATIBILITY ---
   
-  const insertPromise = supabase.from('check_ins').insert({
+  const insertPayload = {
       id: Date.now().toString(),
       user_id: userId,
       date: today,
       timestamp: new Date().toISOString(),
       photo: photoBase64, 
       caption: caption,
-      likes: []
-  });
+      likes: [],
+      videos: videoBase64 ? [videoBase64] : []
+  };
+
+  const insertPromise = supabase.from('check_ins').insert(insertPayload);
 
   const timeoutPromise = new Promise((_, reject) => {
       // Increased timeout to 120s for safer mobile uploads
@@ -535,7 +547,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   } catch (err) {
       // Catch Timeout or Supabase Error
       console.warn("Check-in failed due to timeout or error, switching to Local Mode.", err);
-      return await saveToLocalFallback(userId, photoBase64, caption);
+      return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
   }
 };
 
