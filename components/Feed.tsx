@@ -17,16 +17,16 @@ const LazyVideo = ({ src }: { src: string }) => {
         return (
             <div 
                 className="w-full h-full bg-black flex items-center justify-center cursor-pointer group relative overflow-hidden"
-                onClick={() => setIsPlaying(true)}
+                onClick={(e) => { e.stopPropagation(); setIsPlaying(true); }}
             >
                 {/* Thumb/Placeholder Effect */}
                 <div className="absolute inset-0 bg-gradient-to-tr from-slate-900 to-slate-800 opacity-50"></div>
                 
                 {/* Play Button */}
-                <div className="z-10 w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm border border-white/40 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="currentColor" strokeWidth="0" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <div className="z-10 w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm border border-white/40 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white" stroke="currentColor" strokeWidth="0" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                 </div>
-                <span className="absolute bottom-2 right-2 text-[9px] font-bold text-white/70 bg-black/50 px-1.5 py-0.5 rounded">VÍDEO</span>
+                <span className="absolute bottom-2 right-2 text-[8px] font-bold text-white/70 bg-black/50 px-1.5 py-0.5 rounded uppercase tracking-wider">Assistir</span>
             </div>
         );
     }
@@ -37,6 +37,7 @@ const LazyVideo = ({ src }: { src: string }) => {
             controls 
             autoPlay 
             className="w-full h-full object-cover animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
         />
     );
 };
@@ -268,7 +269,7 @@ const FeedPost = memo(({
                     )}
                 </div>
 
-                {/* Video Carousel using LazyVideo */}
+                {/* Video Carousel using LazyVideo for Optimization */}
                 {videos.length > 0 && (
                     <div className="flex overflow-x-auto gap-2 p-2 bg-slate-900 scrollbar-thin scrollbar-thumb-brand-primary">
                         {videos.map((vid, idx) => (

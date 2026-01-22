@@ -24,6 +24,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   const [rivalryNotification, setRivalryNotification] = useState<Notification | null>(null);
   const [loading, setLoading] = useState(false);
   const [goatMood, setGoatMood] = useState<GoatMood>(null);
+  const [showCalendar, setShowCalendar] = useState(false); // State for collapsible calendar
   
   // Ref para detectar level up sem renderizar
   const prevLevelRef = useRef(Math.floor((user.score || 0) / 100) + 1);
@@ -321,40 +322,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         </div>
       </div>
 
-      {/* HEATMAP CALENDAR */}
-      <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-700/50">
-        <div className="flex justify-between items-center mb-4">
-            <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-                Frequência ({d.toLocaleString('pt-BR', { month: 'long' })})
-            </h3>
-            <span className="text-xs text-brand-accent">{Math.round((user.checkIns.length / daysInMonth) * 100)}%</span>
-        </div>
-        <div className="grid grid-cols-7 gap-1.5">
-            {['D','S','T','Q','Q','S','S'].map((day, i) => (
-                <div key={i} className="text-[10px] text-center text-slate-500 font-bold mb-1">{day}</div>
-            ))}
-            {Array.from({ length: new Date(currentYear, currentMonth, 1).getDay() }).map((_, i) => (
-                <div key={`empty-${i}`} className="aspect-square"></div>
-            ))}
-            {daysArray.map(day => {
-                const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const checked = user.checkIns.some(c => c.date === dateStr);
-                const isToday = day === d.getDate();
-                
-                return (
-                    <div 
-                        key={day} 
-                        className={`aspect-square rounded-md flex items-center justify-center text-[10px] font-bold transition-all
-                            ${checked ? 'bg-brand-accent text-white shadow-[0_0_8px_rgba(236,72,153,0.4)]' : 'bg-slate-700/50 text-slate-600'}
-                            ${isToday && !checked ? 'border border-slate-500 text-slate-300' : ''}
-                        `}
-                    >
-                        {day}
-                    </div>
-                );
-            })}
-        </div>
+      {/* EXPANDABLE HEATMAP CALENDAR */}
+      <div className="bg-slate-800/40 rounded-2xl border border-slate-700/50 overflow-hidden transition-all duration-300">
+        <button 
+            onClick={() => { playSound.click(); setShowCalendar(!showCalendar); }}
+            className="w-full p-4 flex justify-between items-center text-slate-300 hover:bg-slate-800/50 transition-colors bg-transparent border-none outline-none"
+        >
+            <div className="flex justify-between items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+                    Frequência ({d.toLocaleString('pt-BR', { month: 'long' })})
+                </span>
+                <span className="text-xs text-brand-accent bg-slate-900 px-2 py-0.5 rounded-full">{Math.round((user.checkIns.length / daysInMonth) * 100)}%</span>
+            </div>
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" height="16" 
+                viewBox="0 0 24 24" 
+                fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+                className={`transform transition-transform duration-300 ${showCalendar ? 'rotate-180' : ''}`}
+            >
+                <path d="m6 9 6 6 6-6"/>
+            </svg>
+        </button>
+        
+        {showCalendar && (
+            <div className="p-4 pt-0 animate-fade-in">
+                <div className="grid grid-cols-7 gap-1.5 mt-2">
+                    {['D','S','T','Q','Q','S','S'].map((day, i) => (
+                        <div key={i} className="text-[10px] text-center text-slate-500 font-bold mb-1">{day}</div>
+                    ))}
+                    {Array.from({ length: new Date(currentYear, currentMonth, 1).getDay() }).map((_, i) => (
+                        <div key={`empty-${i}`} className="aspect-square"></div>
+                    ))}
+                    {daysArray.map(day => {
+                        const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const checked = user.checkIns.some(c => c.date === dateStr);
+                        const isToday = day === d.getDate();
+                        
+                        return (
+                            <div 
+                                key={day} 
+                                className={`aspect-square rounded-md flex items-center justify-center text-[10px] font-bold transition-all
+                                    ${checked ? 'bg-brand-accent text-white shadow-[0_0_8px_rgba(236,72,153,0.4)]' : 'bg-slate-700/50 text-slate-600'}
+                                    ${isToday && !checked ? 'border border-slate-500 text-slate-300' : ''}
+                                `}
+                            >
+                                {day}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        )}
       </div>
 
       {/* TROPHY ROOM (BADGES) */}
