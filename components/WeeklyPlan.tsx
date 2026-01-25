@@ -17,6 +17,14 @@ export const WeeklyPlan: React.FC<WeeklyPlanProps> = ({ user, onUpdateUser, onTr
     const [localPlan, setLocalPlan] = useState<WeeklyPlanType>(user.weeklyPlan || {});
     const [weekDates, setWeekDates] = useState<{ [key: string]: string }>({});
 
+    // Helper para formatar data localmente YYYY-MM-DD (Evita bug de fuso horário UTC)
+    const formatDateLocal = (date: Date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     // Calcular as datas da semana atual (Domingo a Sábado)
     useEffect(() => {
         const now = new Date();
@@ -28,7 +36,7 @@ export const WeeklyPlan: React.FC<WeeklyPlanProps> = ({ user, onUpdateUser, onTr
         DAYS_ORDER.forEach((day, index) => {
             const d = new Date(now);
             d.setDate(diff + index);
-            dates[day] = d.toISOString().split('T')[0]; // YYYY-MM-DD
+            dates[day] = formatDateLocal(d);
         });
         
         setWeekDates(dates);
@@ -64,7 +72,7 @@ export const WeeklyPlan: React.FC<WeeklyPlanProps> = ({ user, onUpdateUser, onTr
 
     const isToday = (day: string) => {
         const dateStr = weekDates[day];
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = formatDateLocal(new Date());
         return dateStr === todayStr;
     };
 

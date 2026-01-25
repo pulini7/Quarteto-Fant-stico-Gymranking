@@ -233,7 +233,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
       {isWeekend && !hasCheckedIn && (
         <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-3 text-white text-center shadow-lg animate-pulse border border-white/20">
             <p className="text-xs font-bold tracking-widest uppercase">{dayName} chegou</p>
-            <p className="text-lg font-black flex items-center justify-center gap-2">🔥 TREINO LIBERADO 🔥</p>
+            <p className="text-lg font-black flex items-center justify-center gap-2">🔥 XP EM DOBRO 🔥</p>
         </div>
       )}
 

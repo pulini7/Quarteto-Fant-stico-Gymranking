@@ -138,13 +138,46 @@ const mapUserFromDB = (dbUser: any): User => ({
   notifications: dbUser.notifications ? dbUser.notifications.map(mapNotificationFromDB) : []
 });
 
+// --- HELPER: Merge Remote and Local Data ---
+const mergeUserWithLocalData = (remoteUser: User, db: any): User => {
+    const localUser = db.users.find((u: any) => u.id === remoteUser.id);
+    const mergedUser = { ...remoteUser };
+
+    // 1. Merge CheckIns (Priority: Remote, but add Local-only)
+    const localCheckIns = db.check_ins
+        .filter((c: any) => c.user_id === remoteUser.id)
+        .map((c: any) => {
+             const comments = db.comments.filter((cm: any) => cm.check_in_id === c.id);
+             return { ...c, comments };
+        })
+        .map(mapCheckInFromDB);
+
+    const existingIds = new Set(remoteUser.checkIns.map(c => c.id));
+    const missingLocalCheckIns = localCheckIns.filter((c: CheckIn) => !existingIds.has(c.id));
+    
+    if (missingLocalCheckIns.length > 0) {
+        mergedUser.checkIns = [...remoteUser.checkIns, ...missingLocalCheckIns];
+        // Re-sort descending
+        mergedUser.checkIns.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }
+
+    // 2. Merge Stats (If local is higher/newer, use it - handling optimistic updates)
+    if (localUser) {
+        if (localUser.score > mergedUser.score) {
+            mergedUser.score = localUser.score;
+        }
+        if (localUser.streak > mergedUser.streak) {
+            mergedUser.streak = localUser.streak;
+        }
+    }
+    
+    return mergedUser;
+};
+
 // --- Core Functions ---
 
 export const resetGlobalRanking = async (): Promise<void> => {
-    // Reseta o score E O STREAK de TODOS os usuários para 0 no Supabase
     await supabase.from('users').update({ score: 0, streak: 0 }).neq('id', '0'); 
-
-    // Reseta local também para refletir na hora
     const db = getLocalDB();
     db.users.forEach((u: any) => { u.score = 0; u.streak = 0; });
     saveLocalDB(db);
@@ -209,30 +242,18 @@ export const getUsersLight = async (): Promise<User[]> => {
         notifications: []
     }));
 
-    return users.filter(u => !isHiddenUser(u.name));
+    // Merge with basic local data if needed (scores/streaks primarily)
+    const db = getLocalDB();
+    const mergedUsers = users.map(u => mergeUserWithLocalData(u, db));
+
+    return mergedUsers.filter(u => !isHiddenUser(u.name));
 }
 
 export const getLeaderboardData = async (): Promise<User[]> => {
-    const { data, error } = await supabase
-        .from('users')
-        .select(`
-            id, name, avatar_seed, custom_avatar, score, streak,
-            check_ins (id, date)
-        `)
-        .order('score', { ascending: false });
-
-    if (error) return getUsers(); 
-
-    const users = data.map((u: any) => ({
-        ...mapUserFromDB(u),
-        checkIns: u.check_ins.map((c: any) => ({ id: c.id, date: c.date, photo: '', timestamp: '', likes: [], videos: [] }))
-    }));
-
-    return users.filter(u => !isHiddenUser(u.name));
+    return getUsers(); // Use full logic to ensure correct counts
 }
 
 export const getUsers = async (): Promise<User[]> => {
-  // Mesmo fallback para a query pesada
   let query = supabase
     .from('users')
     .select(`
@@ -262,11 +283,10 @@ export const getUsers = async (): Promise<User[]> => {
       error = retry.error;
   }
 
-  let users: User[] = [];
+  const db = getLocalDB();
 
   if (error) {
     console.warn('Supabase error (switching to local):', error.message);
-    const db = getLocalDB();
     const usersWithRelations = db.users.map((u: any) => {
         const uCheckIns = db.check_ins.filter((c: any) => c.user_id === u.id).map((c: any) => ({
             ...c,
@@ -274,15 +294,19 @@ export const getUsers = async (): Promise<User[]> => {
         }));
         return { ...u, check_ins: uCheckIns };
     });
-    users = usersWithRelations.map(mapUserFromDB).sort((a: User, b: User) => b.score - a.score);
-  } else if (!data || data.length === 0) {
+    return usersWithRelations.map(mapUserFromDB).sort((a: User, b: User) => b.score - a.score).filter(u => !isHiddenUser(u.name));
+  } 
+  
+  if (!data || data.length === 0) {
       await seedInitialData();
       return getUsers();
-  } else {
-      users = data.map(mapUserFromDB);
-  }
+  } 
+  
+  // MERGE STRATEGY: Combine Remote + Local
+  const remoteUsers = data.map(mapUserFromDB);
+  const finalUsers = remoteUsers.map(u => mergeUserWithLocalData(u, db));
 
-  return users.filter(u => !isHiddenUser(u.name));
+  return finalUsers.filter(u => !isHiddenUser(u.name));
 };
 
 const seedInitialData = async () => {
@@ -349,8 +373,9 @@ export const getUserByName = async (name: string): Promise<User | null> => {
     .ilike('name', name)
     .single();
 
+  const db = getLocalDB();
+
   if (error || !data) {
-      const db = getLocalDB();
       const localUser = db.users.find((u: any) => u.name.toLowerCase() === name.toLowerCase());
       if (!localUser) return null;
       const uCheckIns = db.check_ins.filter((c: any) => c.user_id === localUser.id).map((c: any) => ({
@@ -362,8 +387,39 @@ export const getUserByName = async (name: string): Promise<User | null> => {
   }
 
   const { data: notifs } = await supabase.from('notifications').select('*').eq('user_id', data.id);
-  const user = mapUserFromDB(data);
+  let user = mapUserFromDB(data);
   user.notifications = notifs ? notifs.map(mapNotificationFromDB) : [];
+  
+  // SAFETY CHECK GAP FILLER
+  // Verifica se o usuário tem checkin hoje. Se não tiver no objeto retornado (possível lag de join),
+  // faz uma query direta para garantir a consistência com o Feed.
+  const today = getTodayString();
+  const hasToday = user.checkIns.some(c => c.date === today);
+  
+  if (!hasToday) {
+      const { data: directCheckIn } = await supabase
+        .from('check_ins')
+        .select('*, comments(*)')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .single();
+      
+      if (directCheckIn) {
+          const checkIn = mapCheckInFromDB(directCheckIn);
+          user.checkIns = [checkIn, ...user.checkIns];
+          // Recalcula streak visualmente se necessário
+          const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+          const hasYesterday = user.checkIns.some(c => c.date === yesterdayStr);
+          if (hasYesterday) {
+             // Apenas update visual, o banco já deve estar com o valor correto ou sendo atualizado pelo performCheckIn
+             user.streak = (user.streak === 0) ? 1 : user.streak; 
+          }
+      }
+  }
+
+  // CRITICAL FIX: Merge with local data to show pending check-ins immediately
+  user = mergeUserWithLocalData(user, db);
+
   return user;
 };
 
@@ -457,7 +513,11 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       let newStreak = 1;
       if (hasYesterday) newStreak = user.streak + 1;
       
-      const pointsEarned = 1;
+      // LOGICA DE PONTOS: Fim de semana vale 2x
+      const d = new Date();
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const pointsEarned = isWeekend ? 2 : 1;
+      
       const newScore = user.score + pointsEarned;
 
       const newCheckIn = {
@@ -484,14 +544,24 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       if (hasCheckInYesterday) {
           newStreak = currentStreak + 1;
       }
-      const pointsEarned = 1;
+      // LOGICA DE PONTOS: Fim de semana vale 2x
+      const d = new Date();
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const pointsEarned = isWeekend ? 2 : 1;
+
       const newScore = currentScore + pointsEarned;
       return { newScore, newStreak };
   };
 
   try {
       // 1. Fetch current user state from DB
-      const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
+      // CRITICAL FIX: Fetch FULL check_ins structure (with comments) so we don't corrupt the local state
+      // with a partial object (e.g. only dates) when we return the optimistic update.
+      const { data: userDB, error: fetchError } = await supabase
+        .from('users')
+        .select('*, check_ins(*, comments(*))')
+        .eq('id', userId)
+        .single();
       
       if (fetchError || !userDB) {
           return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
