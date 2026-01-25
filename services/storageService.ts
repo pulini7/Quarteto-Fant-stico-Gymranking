@@ -678,64 +678,67 @@ export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
     const from = page * limit;
     const to = from + limit - 1;
 
-    const { data: checkIns, error } = await supabase
+    // 1. Fetch from Supabase
+    const { data: supabaseCheckIns, error } = await supabase
         .from('check_ins')
         .select(`*, comments (*), users (id, name, avatar_seed, custom_avatar)`)
         .order('timestamp', { ascending: false })
         .range(from, to);
     
-    let result = [];
+    // 2. Fetch from Local Storage (Fallback)
+    // Always fetch local data to ensure "offline" or "timeout" check-ins are visible
+    const db = getLocalDB();
+    const localHiddenIds = db.users.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id);
+    
+    const localCheckIns = db.check_ins.map((c: any) => {
+        const u = db.users.find((user: any) => user.id === c.user_id);
+        const comments = db.comments.filter((cm: any) => cm.check_in_id === c.id);
+        return { ...c, comments: comments, users: u };
+    });
 
-    if (error) {
-        const db = getLocalDB();
-        const localHiddenIds = db.users.filter((u: any) => isHiddenUser(u.name)).map((u: any) => u.id);
-        const combined = db.check_ins.map((c: any) => {
-            const u = db.users.find((user: any) => user.id === c.user_id);
-            const comments = db.comments.filter((cm: any) => cm.check_in_id === c.id);
-            return { ...c, comments: comments, users: u };
-        }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    // 3. Merge Strategies
+    let mergedCheckIns = [];
 
-        const paginatedCombined = combined.slice(from, from + limit);
-
-        result = paginatedCombined.map((row: any) => ({
-            user: {
-                id: row.users.id,
-                name: row.users.name,
-                avatarSeed: row.users.avatar_seed,
-                customAvatar: row.users.custom_avatar,
-                checkIns: [], streak: 0, score: 0
-            } as User,
-            checkIn: mapCheckInFromDB(row)
-        }));
+    if (error || !supabaseCheckIns) {
+        // If Supabase failed completely, use local only
+        mergedCheckIns = localCheckIns;
+    } else {
+        // If Supabase succeeded, we still want to show pending local check-ins that aren't in Supabase yet
+        // Filter out local check-ins that are already in Supabase (by ID)
+        const supabaseIds = new Set(supabaseCheckIns.map((c: any) => c.id));
+        const pendingLocal = localCheckIns.filter((c: any) => !supabaseIds.has(c.id));
         
-        result = result.filter((item: any) => !isHiddenUser(item.user.name));
-        result.forEach((item: any) => {
-             item.checkIn.likes = item.checkIn.likes.filter((id: string) => !localHiddenIds.includes(id));
-             item.checkIn.comments = item.checkIn.comments.filter((c: Comment) => !localHiddenIds.includes(c.userId));
-        });
-        return result;
+        mergedCheckIns = [...supabaseCheckIns, ...pendingLocal];
     }
 
-    if (!checkIns) return [];
-
-    result = checkIns.map((row: any) => ({
+    // 4. Sort and Pagination logic after merge (simplified for feed mix)
+    // Note: Since we are mixing paginated remote data with all local data, 
+    // sorting might put local data on top.
+    mergedCheckIns.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    
+    // Slice to respect page limit if we are strictly offline, but if mixing, we might show a bit more
+    // For now, let's just map and filter hidden users
+    let result = mergedCheckIns.map((row: any) => ({
         user: {
-            id: row.users.id,
-            name: row.users.name,
-            avatarSeed: row.users.avatar_seed,
-            customAvatar: row.users.custom_avatar,
+            id: row.users?.id || 'unknown',
+            name: row.users?.name || 'Unknown',
+            avatarSeed: row.users?.avatar_seed || 0,
+            customAvatar: row.users?.custom_avatar,
             checkIns: [], streak: 0, score: 0
         } as User,
         checkIn: mapCheckInFromDB(row)
     }));
-
+    
+    // Filter hidden users
+    const allHiddenIds = [...hiddenUserIds, ...localHiddenIds];
     result = result.filter((item: any) => !isHiddenUser(item.user.name));
+    
     result.forEach((item: any) => {
         if (item.checkIn.likes && item.checkIn.likes.length > 0) {
-            item.checkIn.likes = item.checkIn.likes.filter((userId: string) => !hiddenUserIds.includes(userId));
+            item.checkIn.likes = item.checkIn.likes.filter((userId: string) => !allHiddenIds.includes(userId));
         }
         if (item.checkIn.comments && item.checkIn.comments.length > 0) {
-            item.checkIn.comments = item.checkIn.comments.filter((comment: Comment) => !hiddenUserIds.includes(comment.userId));
+            item.checkIn.comments = item.checkIn.comments.filter((comment: Comment) => !allHiddenIds.includes(comment.userId));
         }
     });
 
