@@ -24,7 +24,7 @@ export const Leaderboard: React.FC = () => {
   }, []);
 
   const handleGlobalReset = async () => {
-    if (window.confirm("ATENÇÃO: Isso zerará a pontuação E OS STREAKS de TODOS os usuários! Os check-ins (histórico) serão mantidos. Tem certeza?")) {
+    if (window.confirm("ATENÇÃO: Isso zerará a contagem E OS STREAKS de TODOS os usuários! Os check-ins (histórico) serão mantidos. Tem certeza?")) {
         setResetting(true);
         await resetGlobalRanking();
         await loadUsers(); // Reload to show 0
@@ -58,12 +58,11 @@ export const Leaderboard: React.FC = () => {
       return checkInDate >= start;
     });
 
-    // Simples: 1 Checkin = 1 Ponto
-    const score = validCheckIns.length; 
+    // Count strictly by frequency
+    const count = validCheckIns.length; 
 
     return {
-      score,
-      count: validCheckIns.length
+      count: count
     };
   };
 
@@ -73,15 +72,12 @@ export const Leaderboard: React.FC = () => {
     return users
       .map(u => {
         const stats = calculatePeriodStats(u, startDate);
-        // Se quisermos usar o score global do banco (que agora é 1 ponto por checkin desde o reset), usamos u.score
-        // Mas para filtros de tempo (Semana/Mês), usamos o calculado dinamicamente
         return {
           ...u,
-          periodScore: stats.score,
           periodCount: stats.count
         };
       }).sort((a, b) => {
-          return (b.periodScore - a.periodScore) || (b.periodCount - a.periodCount);
+          return (b.periodCount - a.periodCount);
       });
   }, [timeframe, users]);
 
@@ -90,9 +86,9 @@ export const Leaderboard: React.FC = () => {
     const ranked = users
         .map(u => {
             const stats = calculatePeriodStats(u, startDate);
-            return { ...u, periodScore: stats.score, periodCount: stats.count };
-        }).sort((a, b) => (b.periodScore - a.periodScore) || (b.periodCount - a.periodCount));
-    return ranked[0]?.periodScore > 0 ? ranked[0] : null;
+            return { ...u, periodCount: stats.count };
+        }).sort((a, b) => (b.periodCount - a.periodCount));
+    return ranked[0]?.periodCount > 0 ? ranked[0] : null;
   }, [users]);
 
   if (loading && users.length === 0) {
@@ -121,7 +117,6 @@ export const Leaderboard: React.FC = () => {
                     <h3 className="text-xl font-bold text-white leading-tight">{athleteOfTheWeek.name}</h3>
                     <p className="text-yellow-500 font-medium text-sm mb-2">Dominando o Ranking!</p>
                     <div className="flex items-center gap-3 text-xs text-slate-400">
-                        <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700">⚡ {athleteOfTheWeek.periodScore} Pts</span>
                         <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700">🏋️ {athleteOfTheWeek.periodCount} Treinos</span>
                     </div>
                 </div>
@@ -129,7 +124,7 @@ export const Leaderboard: React.FC = () => {
         </div>
       ) : (
         <div className="bg-slate-800/50 rounded-2xl p-6 text-center border border-slate-700 border-dashed">
-            <p className="text-slate-400 text-sm">A semana está começando! Quem será a primeira a pontuar?</p>
+            <p className="text-slate-400 text-sm">A semana está começando! Quem será a primeira a postar?</p>
         </div>
       )}
 
@@ -148,12 +143,10 @@ export const Leaderboard: React.FC = () => {
 
       <div className="space-y-3">
         {leaderboardData.map((u, index) => {
-            const score = u.periodScore; 
             const count = u.periodCount; 
             
             // LÓGICA DE EMPATE TÉCNICO:
-            // Procura o índice do primeiro usuário com a mesma pontuação e contagem
-            const effectiveRank = leaderboardData.findIndex(p => p.periodScore === score && p.periodCount === count) + 1;
+            const effectiveRank = leaderboardData.findIndex(p => p.periodCount === count) + 1;
             const isTop3 = effectiveRank <= 3;
 
             let rankColor = "text-slate-500";
@@ -180,13 +173,8 @@ export const Leaderboard: React.FC = () => {
                              </div>
                              <div className="flex items-center gap-4">
                                 <div className="text-right flex flex-col items-end">
-                                    <span className={`font-bold text-sm ${isTop3 ? 'text-slate-200' : 'text-slate-400'}`}>{count}</span>
+                                    <span className={`font-bold text-lg ${isTop3 ? 'text-white' : 'text-slate-400'}`}>{count}</span>
                                     <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">Treinos</span>
-                                </div>
-                                <div className="w-px h-6 bg-slate-700"></div>
-                                <div className="text-right flex flex-col items-end min-w-[3rem]">
-                                    <span className={`text-xl font-black leading-none ${isTop3 ? 'text-white' : 'text-slate-500'}`}>{score}</span>
-                                    <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">Pts</span>
                                 </div>
                              </div>
                         </div>
@@ -194,7 +182,7 @@ export const Leaderboard: React.FC = () => {
                 </div>
             )
         })}
-        {leaderboardData.every(u => u.periodScore === 0) && (
+        {leaderboardData.every(u => u.periodCount === 0) && (
             <div className="text-center py-8 opacity-50"><p>Nenhum treino registrado neste período.</p></div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, Notification } from '../types';
 import { performCheckIn, getTodayString, clearNotifications, saveUser, getUsers } from '../services/storageService';
 import { playSound } from '../services/soundService';
@@ -26,9 +26,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   const [goatMood, setGoatMood] = useState<GoatMood>(null);
   const [showCalendar, setShowCalendar] = useState(false); // State for collapsible calendar
   
-  // Ref para detectar level up sem renderizar
-  const prevLevelRef = useRef(Math.floor((user.score || 0) / 100) + 1);
-
   const today = getTodayString();
   
   // Memoize checkin status to avoid array scan on every render
@@ -39,32 +36,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
   // Check if it's weekend
   const d = new Date();
   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-
-  // --- RPG LEVEL LOGIC (Memoized) ---
-  const { level, currentLevelXp, xpToNextLevel, progressPercent, levelTitle } = useMemo(() => {
-      const lvl = Math.floor((user.score || 0) / 100) + 1;
-      const curXp = (user.score || 0) % 100;
-      const nextXp = 100;
-      const prog = (curXp / nextXp) * 100;
-      
-      let title = "Iniciante";
-      if (lvl >= 50) title = "Lenda Viva";
-      else if (lvl >= 20) title = "Monstro";
-      else if (lvl >= 10) title = "Maromba";
-      else if (lvl >= 5) title = "Rato de Academia";
-
-      return { level: lvl, currentLevelXp: curXp, xpToNextLevel: nextXp, progressPercent: prog, levelTitle: title };
-  }, [user.score]);
-
-  // Efeito sonoro de Level UP
-  useEffect(() => {
-    if (level > prevLevelRef.current) {
-        playSound.levelUp();
-        setShowConfetti(true);
-        setTimeout(() => setShowConfetti(false), 5000);
-    }
-    prevLevelRef.current = level;
-  }, [level]);
+  const dayName = d.getDay() === 0 ? 'Domingo' : d.getDay() === 6 ? 'Sábado' : 'Dia de Treino';
 
   // --- HEATMAP LOGIC (Memoized) ---
   const { daysArray, daysInMonth, currentMonth, currentYear } = useMemo(() => {
@@ -180,6 +152,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
             onUpdateUser(updated);
             setHasCheckedIn(true); // Force UI update immediately
             setIsCheckInModalOpen(false);
+            
+            // Confetti on checkin
+            setShowConfetti(true);
+            setTimeout(() => setShowConfetti(false), 5000);
         } else {
              alert("Houve um problema ao confirmar o check-in. Tente novamente.");
         }
@@ -256,19 +232,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
       
       {isWeekend && !hasCheckedIn && (
         <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-3 text-white text-center shadow-lg animate-pulse border border-white/20">
-            <p className="text-xs font-bold tracking-widest uppercase">Modo Fim de Semana Ativo</p>
-            <p className="text-lg font-black flex items-center justify-center gap-2">⚡ XP EM DOBRO HOJE ⚡</p>
+            <p className="text-xs font-bold tracking-widest uppercase">{dayName} chegou</p>
+            <p className="text-lg font-black flex items-center justify-center gap-2">🔥 TREINO LIBERADO 🔥</p>
         </div>
       )}
 
-      {/* Main Profile Card with RPG Level Bar */}
+      {/* Main Profile Card - Simplified (No XP Bar) */}
       <div className="bg-brand-card rounded-3xl p-6 border border-slate-700 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 p-4 opacity-10">
             <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M6 5v14M18 5v14M2 12h20"/></svg>
         </div>
-        <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-4 py-4">
+        <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-3 py-2">
             <div className="relative group">
-                <div className="w-24 h-24 rounded-full bg-slate-700 p-1 border-2 border-brand-accent mb-2 overflow-hidden relative">
+                <div className="w-24 h-24 rounded-full bg-slate-700 p-1 border-2 border-brand-accent mb-2 overflow-hidden relative shadow-2xl">
                     <img src={currentAvatarSrc} alt="Profile" className="w-full h-full rounded-full object-cover" />
                 </div>
                 <button onClick={() => { playSound.click(); setIsAvatarModalOpen(true); }} className="absolute bottom-2 right-0 bg-brand-primary text-white p-2 rounded-full shadow-lg border-2 border-slate-800 hover:scale-110 transition-transform" title="Editar Avatar">
@@ -276,31 +252,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
                 </button>
             </div>
             
-            <div className="w-full max-w-[200px]">
-                <h2 className="text-2xl font-bold text-white leading-none">{user.name}</h2>
-                <p className="text-xs text-brand-accent uppercase tracking-widest font-bold mb-3">{levelTitle}</p>
-                
-                {/* RPG Progress Bar */}
-                <div className="relative w-full h-4 bg-slate-800 rounded-full border border-slate-600 overflow-hidden shadow-inner">
-                    <div 
-                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-pink-500 via-brand-primary to-brand-accent transition-all duration-1000 ease-out"
-                        style={{ width: `${progressPercent}%` }}
-                    >
-                        <div className="w-full h-full animate-pulse opacity-50 bg-white/20"></div>
-                    </div>
-                    <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white drop-shadow-md z-10">
-                        NÍVEL {level}
-                    </div>
-                </div>
-                <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
-                    <span>{currentLevelXp} XP</span>
-                    <span>{xpToNextLevel} XP</span>
+            <div className="w-full">
+                <h2 className="text-3xl font-bold text-white leading-none mb-1">{user.name}</h2>
+                <div className="inline-flex items-center gap-2 bg-slate-800/80 px-4 py-1.5 rounded-full border border-slate-600 mt-2">
+                    <span className="text-brand-accent text-lg">🔥</span>
+                    <span className="font-bold text-white tracking-wide">{user.streak} Dias Seguidos</span>
                 </div>
             </div>
         </div>
       </div>
 
-      {/* --- MOVED CHECK-IN BUTTON HERE FOR VISIBILITY --- */}
+      {/* --- CHECK-IN BUTTON --- */}
       <div className="py-2">
         <Button 
             onClick={() => { playSound.click(); hasCheckedIn ? openProofModal() : setIsCheckInModalOpen(true); }} 
@@ -309,7 +271,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
             className={`py-5 text-lg uppercase tracking-widest shadow-xl border border-white/10 ${!hasCheckedIn ? 'animate-pulse' : ''}`}
             variant={hasCheckedIn ? 'primary' : 'accent'}
         >
-            {loading ? 'Processando...' : (hasCheckedIn ? 'Ver Comprovação 📸' : (isWeekend ? 'Fazer Check-in (XP x2) ⚡' : 'Fazer Check-in Agora 📸'))}
+            {loading ? 'Processando...' : (hasCheckedIn ? 'Ver Comprovação 📸' : (isWeekend ? `Registrar ${dayName} 📸` : 'Fazer Check-in Agora 📸'))}
         </Button>
         {hasCheckedIn && <p className="text-center text-slate-500 text-xs mt-2 animate-fade-in">Treino de hoje pago! Volte amanhã.</p>}
       </div>
