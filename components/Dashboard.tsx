@@ -161,27 +161,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
 
   const handleCheckInComplete = async (photoBase64: string, caption: string, videoBase64?: string) => {
     setLoading(true);
-    // Agora passa o vídeo opcional também
-    const updated = await performCheckIn(user.id, photoBase64, caption, videoBase64);
-    
-    if (updated) {
-        playSound.success();
-        const allUsers = await getUsers();
-        const validUsers = allUsers.filter(u => !['vitor_pulini@hotmail.com', 'administrador', 'admin'].includes(u.name.toLowerCase()));
+    try {
+        const updated = await performCheckIn(user.id, photoBase64, caption, videoBase64);
         
-        if (validUsers.length > 0 && validUsers[0].id === updated.id) {
-            setTimeout(() => setGoatMood('CELEBRATING'), 500);
+        if (updated) {
+            playSound.success();
+            const allUsers = await getUsers();
+            const validUsers = allUsers.filter(u => !['vitor_pulini@hotmail.com', 'administrador', 'admin'].includes(u.name.toLowerCase()));
+            
+            if (validUsers.length > 0 && validUsers[0].id === updated.id) {
+                setTimeout(() => setGoatMood('CELEBRATING'), 500);
+            } else {
+                setTimeout(() => setGoatMood('CHECKIN_DONE'), 500);
+            }
+            onUpdateUser(updated);
+            setHasCheckedIn(true);
+            setIsCheckInModalOpen(false);
         } else {
-            setTimeout(() => setGoatMood('CHECKIN_DONE'), 500);
+             alert("Houve um problema ao confirmar o check-in. Tente novamente.");
         }
-    }
-
-    setLoading(false);
-    
-    if (updated) {
-      onUpdateUser(updated);
-      setHasCheckedIn(true);
-      setIsCheckInModalOpen(false);
+    } catch (e) {
+        console.error("Critical error during checkin flow:", e);
+        alert("Erro inesperado. Verifique sua conexão e tente novamente.");
+    } finally {
+        setLoading(false);
     }
   };
 

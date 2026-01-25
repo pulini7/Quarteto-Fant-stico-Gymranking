@@ -192,9 +192,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({ onConfirm, onClose }
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-          // Limit 150MB
-          if (file.size > 150 * 1024 * 1024) {
-              alert("Vídeo muito grande! Máximo 150MB.");
+          // Limit Reduced to 30MB for Safety
+          if (file.size > 30 * 1024 * 1024) {
+              alert("Vídeo muito grande! O limite de segurança é 30MB para garantir o envio.");
               return;
           }
 

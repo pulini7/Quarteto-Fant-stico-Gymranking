@@ -47,8 +47,12 @@ const cleanupExpiredTestCheckIns = async () => {
 const LOCAL_DB_KEY = 'gymrank_supa_fallback_v1';
 
 const getLocalDB = () => {
-    const stored = localStorage.getItem(LOCAL_DB_KEY);
-    if (stored) return JSON.parse(stored);
+    try {
+        const stored = localStorage.getItem(LOCAL_DB_KEY);
+        if (stored) return JSON.parse(stored);
+    } catch (e) {
+        console.error("Erro ao ler LocalStorage:", e);
+    }
     
     const initial = {
         users: [
@@ -61,12 +65,35 @@ const getLocalDB = () => {
         comments: [],
         notifications: []
     };
-    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(initial));
+    
+    // Tenta salvar o inicial, se falhar, retorna o objeto em memória mesmo
+    try {
+        localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(initial));
+    } catch (e) { /* ignore */ }
+    
     return initial;
 };
 
 const saveLocalDB = (db: any) => {
-    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db));
+    try {
+        localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db));
+    } catch (e) {
+        console.error("Falha ao salvar no LocalStorage (Quota Exceeded possivelmente):", e);
+        // TENTATIVA DE RECUPERAÇÃO: Remove vídeos pesados para liberar espaço
+        try {
+            // Remove vídeos de todos os check-ins locais para caber o texto
+            if (db.check_ins) {
+                db.check_ins.forEach((c: any) => { delete c.videos; });
+            }
+            // Remove notificações lidas
+            if (db.notifications) {
+                db.notifications = db.notifications.filter((n: any) => !n.read);
+            }
+            localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db));
+        } catch (retryError) {
+            console.error("Falha crítica no LocalStorage. Dados não persistidos localmente.", retryError);
+        }
+    }
 };
 
 // --- Data Mapping Helpers ---
@@ -156,7 +183,6 @@ export const getUsersLight = async (): Promise<User[]> => {
         .select('id, name, avatar_seed, custom_avatar, password, streak, score, weekly_plan'); 
 
     if (error) {
-        // Fallback robusto: se a coluna weekly_plan não existir, busca sem ela para não quebrar o app
         console.warn("Recovering from Supabase error (likely missing column):", error.message);
         const retry = await supabase
             .from('users')
@@ -167,7 +193,6 @@ export const getUsersLight = async (): Promise<User[]> => {
     }
 
     if (error || !data) {
-        // Se ainda assim der erro, vai pro fallback local (mas aí perde fotos se não estiverem locais)
         return getUsers();
     }
     
@@ -432,7 +457,6 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       let newStreak = 1;
       if (hasYesterday) newStreak = user.streak + 1;
       
-      // NOVA LÓGICA: 1 Ponto por Check-in
       const pointsEarned = 1;
       const newScore = user.score + pointsEarned;
 
@@ -442,10 +466,11 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
           date: today,
           timestamp: new Date().toISOString(),
           photo: fallbackPhoto,
-          videos: fallbackVideo ? [fallbackVideo] : [],
+          videos: [], // PROTEÇÃO: Não salva vídeo no localStorage para evitar QuotaExceededError (crash)
           caption: fallbackCaption,
           likes: []
       };
+      
       db.check_ins.push(newCheckIn);
       user.score = newScore;
       user.streak = newStreak;
@@ -459,94 +484,84 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       if (hasCheckInYesterday) {
           newStreak = currentStreak + 1;
       }
-      // NOVA LÓGICA: 1 Ponto por Check-in
       const pointsEarned = 1;
       const newScore = currentScore + pointsEarned;
       return { newScore, newStreak };
   };
 
-  const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
-  
-  if (fetchError || !userDB) {
-      return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
-  }
+  try {
+      const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
+      
+      if (fetchError || !userDB) {
+          return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
+      }
 
-  // --- SANDBOX MODE FOR TEST USER ---
-  // If user is test user, SIMULATE success but DO NOT SAVE to database.
-  if (userDB.name === TEST_USER_EMAIL) {
-      console.log("Sandbox Mode Active: Check-in simulated locally only.");
+      // --- SANDBOX MODE FOR TEST USER ---
+      if (userDB.name === TEST_USER_EMAIL) {
+          console.log("Sandbox Mode Active: Check-in simulated locally only.");
+          const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
+          const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
+
+          const uiUser = mapUserFromDB(userDB);
+          uiUser.score = newScore;
+          uiUser.streak = newStreak;
+          
+          const fakeCheckIn: CheckIn = {
+              id: `sandbox-${Date.now()}`,
+              date: today,
+              timestamp: new Date().toISOString(),
+              photo: photoBase64,
+              videos: videoBase64 ? [videoBase64] : [],
+              likes: [],
+              caption: caption,
+              comments: []
+          };
+          
+          uiUser.checkIns = [fakeCheckIn, ...uiUser.checkIns];
+          return uiUser;
+      }
+
+      const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
+      if (hasCheckInToday) return await loginOrCreateUser(userDB.name);
+      
       const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
       const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
 
-      // Create updated user object for UI
-      const uiUser = mapUserFromDB(userDB);
-      uiUser.score = newScore;
-      uiUser.streak = newStreak;
+      // --- CRITICAL FIX: TIMEOUT RACE CONDITION ---
       
-      const fakeCheckIn: CheckIn = {
-          id: `sandbox-${Date.now()}`,
+      const insertPayload = {
+          id: Date.now().toString(),
+          user_id: userId,
           date: today,
           timestamp: new Date().toISOString(),
-          photo: photoBase64,
-          videos: videoBase64 ? [videoBase64] : [],
-          likes: [],
+          photo: photoBase64, 
           caption: caption,
-          comments: []
+          likes: [],
+          videos: videoBase64 ? [videoBase64] : []
       };
-      
-      // Prepend to array so it shows up
-      uiUser.checkIns = [fakeCheckIn, ...uiUser.checkIns];
-      
-      return uiUser;
-  }
-  // --- END SANDBOX MODE ---
 
-  // Check valid stats
-  const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
-  if (hasCheckInToday) return await loginOrCreateUser(userDB.name);
-  
-  const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
-  const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
+      const insertPromise = supabase.from('check_ins').insert(insertPayload);
 
-  // --- CRITICAL FIX: TIMEOUT RACE CONDITION & COMPATIBILITY ---
-  
-  const insertPayload = {
-      id: Date.now().toString(),
-      user_id: userId,
-      date: today,
-      timestamp: new Date().toISOString(),
-      photo: photoBase64, 
-      caption: caption,
-      likes: [],
-      videos: videoBase64 ? [videoBase64] : []
-  };
+      const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Supabase Timeout')), 120000); 
+      });
 
-  const insertPromise = supabase.from('check_ins').insert(insertPayload);
-
-  const timeoutPromise = new Promise((_, reject) => {
-      // Increased timeout to 120s for safer mobile uploads
-      setTimeout(() => reject(new Error('Supabase Timeout')), 120000); 
-  });
-
-  try {
       const result: any = await Promise.race([insertPromise, timeoutPromise]);
       
       if (result.error) throw result.error;
 
-      // Update User Stats
       await supabase.from('users').update({
           score: newScore,
           streak: newStreak
       }).eq('id', userId);
 
-      // Fire and forget provocation
       processProvocations(userId, userDB.name, userDB.score || 0, newScore);
       
       return await loginOrCreateUser(userDB.name);
 
   } catch (err) {
-      // Catch Timeout or Supabase Error
       console.warn("Check-in failed due to timeout or error, switching to Local Mode.", err);
+      // Se falhar o envio para o Supabase (ex: video grande demais), tenta localmente SEM O VÍDEO
       return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
   }
 };
@@ -561,9 +576,15 @@ export const addVideoToCheckIn = async (checkInId: string, videoBase64: string):
         const checkIn = db.check_ins.find((c: any) => c.id === checkInId);
         if (checkIn) {
             if (!checkIn.videos) checkIn.videos = [];
-            checkIn.videos.push(videoBase64);
-            saveLocalDB(db);
-            return true;
+            // LOCAL STORAGE PROTECTION: Não salva vídeos grandes
+            if (videoBase64.length < 500000) {
+                 checkIn.videos.push(videoBase64);
+                 saveLocalDB(db);
+                 return true;
+            } else {
+                console.warn("Vídeo ignorado no armazenamento local por tamanho.");
+                return false;
+            }
         }
         return false;
     }
@@ -574,7 +595,7 @@ export const addVideoToCheckIn = async (checkInId: string, videoBase64: string):
 }
 
 export const addComment = async (checkInId: string, userId: string, text: string): Promise<void> => {
-    // SANDBOX: If user is test user, return success without saving
+    // SANDBOX
     const { data: u } = await supabase.from('users').select('name').eq('id', userId).single();
     if (u && u.name === TEST_USER_EMAIL) return;
 
@@ -697,7 +718,6 @@ export const getAllCheckIns = async (page: number = 0, limit: number = 10) => {
 };
 
 export const toggleCheckInLike = async (checkInId: string, currentUserId: string): Promise<void> => {
-    // SANDBOX
     const { data: u } = await supabase.from('users').select('name').eq('id', currentUserId).single();
     if (u && u.name === TEST_USER_EMAIL) return;
 
