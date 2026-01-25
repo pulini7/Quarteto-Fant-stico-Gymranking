@@ -248,7 +248,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <img src={avatarSrc} alt={user.name} className="w-full h-full rounded-full object-cover border-4 border-slate-700 shadow-xl bg-slate-700" loading="lazy" />
                   </div>
                   <span className="text-lg font-bold text-slate-200">{user.name}</span>
-                  {user.streak > 0 && <span className="absolute -bottom-2 bg-brand-accent text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg border border-brand-card flex items-center gap-1">🔥 {user.streak}</span>}
                 </button>
                );
             })}
