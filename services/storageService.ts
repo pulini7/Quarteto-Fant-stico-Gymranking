@@ -490,6 +490,7 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
   };
 
   try {
+      // 1. Fetch current user state from DB
       const { data: userDB, error: fetchError } = await supabase.from('users').select('*, check_ins(date)').eq('id', userId).single();
       
       if (fetchError || !userDB) {
@@ -522,7 +523,10 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       }
 
       const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
-      if (hasCheckInToday) return await loginOrCreateUser(userDB.name);
+      if (hasCheckInToday) {
+          // If already checked in, just return fresh data
+          return await loginOrCreateUser(userDB.name);
+      }
       
       const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
       const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
@@ -541,23 +545,44 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       };
 
       const insertPromise = supabase.from('check_ins').insert(insertPayload);
-
-      const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Supabase Timeout')), 120000); 
-      });
-
-      const result: any = await Promise.race([insertPromise, timeoutPromise]);
-      
-      if (result.error) throw result.error;
-
-      await supabase.from('users').update({
+      const updatePromise = supabase.from('users').update({
           score: newScore,
           streak: newStreak
       }).eq('id', userId);
 
+      const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Supabase Timeout')), 60000); 
+      });
+
+      // Wait for both insert and update OR timeout
+      await Promise.race([Promise.all([insertPromise, updatePromise]), timeoutPromise]);
+
+      // Fire and forget provocation check
       processProvocations(userId, userDB.name, userDB.score || 0, newScore);
       
-      return await loginOrCreateUser(userDB.name);
+      // OPTIMISTIC UPDATE:
+      // Instead of fetching from DB (which might be slow to index), construct the new user object manually.
+      // This fixes the "Race Condition" where the user sees the old state after a successful check-in.
+      const optimisticCheckIn: CheckIn = {
+          id: insertPayload.id,
+          date: insertPayload.date,
+          timestamp: insertPayload.timestamp,
+          photo: insertPayload.photo,
+          caption: insertPayload.caption,
+          likes: [],
+          videos: insertPayload.videos,
+          comments: []
+      };
+
+      const baseUser = mapUserFromDB(userDB);
+      const updatedUser: User = {
+          ...baseUser,
+          score: newScore,
+          streak: newStreak,
+          checkIns: [optimisticCheckIn, ...baseUser.checkIns]
+      };
+
+      return updatedUser;
 
   } catch (err) {
       console.warn("Check-in failed due to timeout or error, switching to Local Mode.", err);

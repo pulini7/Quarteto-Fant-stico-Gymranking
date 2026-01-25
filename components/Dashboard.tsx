@@ -166,6 +166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
         
         if (updated) {
             playSound.success();
+            // Verifica Goat Mood
             const allUsers = await getUsers();
             const validUsers = allUsers.filter(u => !['vitor_pulini@hotmail.com', 'administrador', 'admin'].includes(u.name.toLowerCase()));
             
@@ -174,8 +175,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onUpdateUser }) => {
             } else {
                 setTimeout(() => setGoatMood('CHECKIN_DONE'), 500);
             }
+            
+            // UI Updates
             onUpdateUser(updated);
-            setHasCheckedIn(true);
+            setHasCheckedIn(true); // Force UI update immediately
             setIsCheckInModalOpen(false);
         } else {
              alert("Houve um problema ao confirmar o check-in. Tente novamente.");
