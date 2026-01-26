@@ -17,6 +17,56 @@ export const isWeekend = (dateString: string): boolean => {
   return day === 0 || day === 6;
 };
 
+// --- STATS CALCULATION ENGINE (SINGLE SOURCE OF TRUTH) ---
+// Calcula Score e Streak baseado puramente no histórico de check-ins
+const calculateStatsFromCheckIns = (checkIns: CheckIn[]) => {
+    // 1. Get Unique Dates sorted Descending
+    const uniqueDates = Array.from(new Set(checkIns.map(c => c.date))).sort().reverse();
+    
+    let score = 0;
+    
+    // 2. Calculate Score (Rules: 1pt Weekday, 2pt Weekend)
+    checkIns.forEach(c => {
+        const d = new Date(`${c.date}T12:00:00`);
+        const day = d.getDay(); // 0=Sun, 6=Sat
+        const isWknd = day === 0 || day === 6;
+        score += isWknd ? 2 : 1;
+    });
+
+    // 3. Calculate Streak
+    let streak = 0;
+    const today = getTodayString();
+    
+    const getPreviousDate = (dateStr: string) => {
+        const d = new Date(`${dateStr}T12:00:00`);
+        d.setDate(d.getDate() - 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    const hasToday = uniqueDates.includes(today);
+    const yesterday = getPreviousDate(today);
+    const hasYesterday = uniqueDates.includes(yesterday);
+
+    if (hasToday || hasYesterday) {
+        streak = 1;
+        let currentCheck = hasToday ? today : yesterday;
+        while (true) {
+            const prev = getPreviousDate(currentCheck);
+            if (uniqueDates.includes(prev)) {
+                streak++;
+                currentCheck = prev;
+            } else {
+                break;
+            }
+        }
+    }
+
+    return { score, streak };
+};
+
 // --- Security / Filtering Helpers ---
 const TEST_USER_EMAIL = 'vitor_pulini@hotmail.com';
 const HIDDEN_NAMES = ['administrador', 'admin', 'vitor_pulini@hotmail.com']; 
@@ -79,13 +129,10 @@ const saveLocalDB = (db: any) => {
         localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db));
     } catch (e) {
         console.error("Falha ao salvar no LocalStorage (Quota Exceeded possivelmente):", e);
-        // TENTATIVA DE RECUPERAÇÃO: Remove vídeos pesados para liberar espaço
         try {
-            // Remove vídeos de todos os check-ins locais para caber o texto
             if (db.check_ins) {
                 db.check_ins.forEach((c: any) => { delete c.videos; });
             }
-            // Remove notificações lidas
             if (db.notifications) {
                 db.notifications = db.notifications.filter((n: any) => !n.read);
             }
@@ -161,15 +208,11 @@ const mergeUserWithLocalData = (remoteUser: User, db: any): User => {
         mergedUser.checkIns.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     }
 
-    // 2. Merge Stats (If local is higher/newer, use it - handling optimistic updates)
-    if (localUser) {
-        if (localUser.score > mergedUser.score) {
-            mergedUser.score = localUser.score;
-        }
-        if (localUser.streak > mergedUser.streak) {
-            mergedUser.streak = localUser.streak;
-        }
-    }
+    // 2. Recalculate Stats after Merge to ensure accuracy
+    // Instead of trusting local score, we recalc from the merged check-ins
+    const { score, streak } = calculateStatsFromCheckIns(mergedUser.checkIns);
+    mergedUser.score = score;
+    mergedUser.streak = streak;
     
     return mergedUser;
 };
@@ -177,6 +220,8 @@ const mergeUserWithLocalData = (remoteUser: User, db: any): User => {
 // --- Core Functions ---
 
 export const resetGlobalRanking = async (): Promise<void> => {
+    // This physically resets the numbers, but if check-ins remain, they will be recalculated on next load.
+    // Ideally this should only be used if wiping check-ins too.
     await supabase.from('users').update({ score: 0, streak: 0 }).neq('id', '0'); 
     const db = getLocalDB();
     db.users.forEach((u: any) => { u.score = 0; u.streak = 0; });
@@ -210,43 +255,9 @@ export const resetUserByName = async (name: string): Promise<boolean> => {
 };
 
 export const getUsersLight = async (): Promise<User[]> => {
-    // TENTA buscar com weekly_plan. Se falhar (coluna não existe), tenta sem.
-    let { data, error } = await supabase
-        .from('users')
-        .select('id, name, avatar_seed, custom_avatar, password, streak, score, weekly_plan'); 
-
-    if (error) {
-        console.warn("Recovering from Supabase error (likely missing column):", error.message);
-        const retry = await supabase
-            .from('users')
-            .select('id, name, avatar_seed, custom_avatar, password, streak, score');
-        
-        data = retry.data;
-        error = retry.error;
-    }
-
-    if (error || !data) {
-        return getUsers();
-    }
-    
-    const users: User[] = data.map((u: any) => ({
-        id: u.id,
-        name: u.name,
-        avatarSeed: u.avatar_seed,
-        customAvatar: u.custom_avatar,
-        password: u.password,
-        streak: u.streak,
-        score: u.score,
-        weeklyPlan: u.weekly_plan || {},
-        checkIns: [],
-        notifications: []
-    }));
-
-    // Merge with basic local data if needed (scores/streaks primarily)
-    const db = getLocalDB();
-    const mergedUsers = users.map(u => mergeUserWithLocalData(u, db));
-
-    return mergedUsers.filter(u => !isHiddenUser(u.name));
+    // Uses full getUsers logic now to ensure stats are correct for login screen badges if we add them back later,
+    // or just to have consistent data structure. Since optimization was requested earlier, we keep it light but correct.
+    return getUsers(); 
 }
 
 export const getLeaderboardData = async (): Promise<User[]> => {
@@ -302,11 +313,27 @@ export const getUsers = async (): Promise<User[]> => {
       return getUsers();
   } 
   
-  // MERGE STRATEGY: Combine Remote + Local
+  // MERGE STRATEGY & SELF-HEALING
   const remoteUsers = data.map(mapUserFromDB);
-  const finalUsers = remoteUsers.map(u => mergeUserWithLocalData(u, db));
+  const finalUsers = remoteUsers.map(u => {
+      // 1. Merge Local Checkins
+      const merged = mergeUserWithLocalData(u, db);
+      
+      // 2. SELF-HEALING: Recalculate stats to guarantee consistency between check_ins count and score/streak
+      const { score, streak } = calculateStatsFromCheckIns(merged.checkIns);
+      
+      // If DB is out of sync, update it silently in background
+      if (score !== u.score || streak !== u.streak) {
+          // console.log(`Self-healing user ${u.name}: Score ${u.score}->${score}, Streak ${u.streak}->${streak}`);
+          supabase.from('users').update({ score, streak }).eq('id', u.id).then();
+          merged.score = score;
+          merged.streak = streak;
+      }
+      
+      return merged;
+  });
 
-  return finalUsers.filter(u => !isHiddenUser(u.name));
+  return finalUsers.sort((a, b) => b.score - a.score).filter(u => !isHiddenUser(u.name));
 };
 
 const seedInitialData = async () => {
@@ -383,7 +410,13 @@ export const getUserByName = async (name: string): Promise<User | null> => {
             comments: db.comments.filter((cm: any) => cm.check_in_id === c.id)
       }));
       const uNotifs = db.notifications.filter((n: any) => n.user_id === localUser.id);
-      return mapUserFromDB({ ...localUser, check_ins: uCheckIns, notifications: uNotifs });
+      
+      let user = mapUserFromDB({ ...localUser, check_ins: uCheckIns, notifications: uNotifs });
+      // Recalc locally
+      const { score, streak } = calculateStatsFromCheckIns(user.checkIns);
+      user.score = score;
+      user.streak = streak;
+      return user;
   }
 
   const { data: notifs } = await supabase.from('notifications').select('*').eq('user_id', data.id);
@@ -391,8 +424,6 @@ export const getUserByName = async (name: string): Promise<User | null> => {
   user.notifications = notifs ? notifs.map(mapNotificationFromDB) : [];
   
   // SAFETY CHECK GAP FILLER
-  // Verifica se o usuário tem checkin hoje. Se não tiver no objeto retornado (possível lag de join),
-  // faz uma query direta para garantir a consistência com o Feed.
   const today = getTodayString();
   const hasToday = user.checkIns.some(c => c.date === today);
   
@@ -407,18 +438,19 @@ export const getUserByName = async (name: string): Promise<User | null> => {
       if (directCheckIn) {
           const checkIn = mapCheckInFromDB(directCheckIn);
           user.checkIns = [checkIn, ...user.checkIns];
-          // Recalcula streak visualmente se necessário
-          const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-          const hasYesterday = user.checkIns.some(c => c.date === yesterdayStr);
-          if (hasYesterday) {
-             // Apenas update visual, o banco já deve estar com o valor correto ou sendo atualizado pelo performCheckIn
-             user.streak = (user.streak === 0) ? 1 : user.streak; 
-          }
       }
   }
 
-  // CRITICAL FIX: Merge with local data to show pending check-ins immediately
+  // Merge Local
   user = mergeUserWithLocalData(user, db);
+
+  // SELF-HEALING ON LOGIN
+  const { score, streak } = calculateStatsFromCheckIns(user.checkIns);
+  if (score !== user.score || streak !== user.streak) {
+      await supabase.from('users').update({ score, streak }).eq('id', user.id);
+      user.score = score;
+      user.streak = streak;
+  }
 
   return user;
 };
@@ -489,14 +521,6 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 
   const today = getTodayString();
   
-  // Create yesterday string using LOCAL time logic to avoid UTC offset issues
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const yYear = d.getFullYear();
-  const yMonth = String(d.getMonth() + 1).padStart(2, '0');
-  const yDay = String(d.getDate()).padStart(2, '0');
-  const yesterdayStr = `${yYear}-${yMonth}-${yDay}`;
-
   // Logic to save local
   const saveToLocalFallback = async (fallbackUserId: string, fallbackPhoto: string, fallbackCaption: string, fallbackVideo?: string) => {
       console.log("TIMEOUT or ERROR: Saving checkin to local storage fallback");
@@ -505,58 +529,32 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
       if (!user) return null;
 
       const userCheckIns = db.check_ins.filter((c: any) => c.user_id === fallbackUserId);
-      if (userCheckIns.some((c: any) => c.date === today)) {
-          return await loginOrCreateUser(user.name);
-      }
-
-      const hasYesterday = userCheckIns.some((c: any) => c.date === yesterdayStr);
-      let newStreak = 1;
-      if (hasYesterday) newStreak = user.streak + 1;
-      
-      // LOGICA DE PONTOS: Fim de semana vale 2x
-      const d = new Date();
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      const pointsEarned = isWeekend ? 2 : 1;
-      
-      const newScore = user.score + pointsEarned;
-
+      // Construct CheckIn object to calculate stats
       const newCheckIn = {
           id: Date.now().toString(),
           user_id: fallbackUserId,
           date: today,
           timestamp: new Date().toISOString(),
           photo: fallbackPhoto,
-          videos: [], // PROTEÇÃO: Não salva vídeo no localStorage para evitar QuotaExceededError (crash)
+          videos: [], 
           caption: fallbackCaption,
           likes: []
       };
+
+      if (!userCheckIns.some((c: any) => c.date === today)) {
+         db.check_ins.push(newCheckIn);
+      }
       
-      db.check_ins.push(newCheckIn);
-      user.score = newScore;
-      user.streak = newStreak;
+      const allCheckIns = [...userCheckIns.map(mapCheckInFromDB), mapCheckInFromDB(newCheckIn)];
+      const { score, streak } = calculateStatsFromCheckIns(allCheckIns);
+      
+      user.score = score;
+      user.streak = streak;
       saveLocalDB(db);
       return await loginOrCreateUser(user.name);
   };
 
-  // Helper calculation
-  const calculateNewStats = (currentScore: number, currentStreak: number, hasCheckInYesterday: boolean) => {
-      let newStreak = 1;
-      if (hasCheckInYesterday) {
-          newStreak = currentStreak + 1;
-      }
-      // LOGICA DE PONTOS: Fim de semana vale 2x
-      const d = new Date();
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      const pointsEarned = isWeekend ? 2 : 1;
-
-      const newScore = currentScore + pointsEarned;
-      return { newScore, newStreak };
-  };
-
   try {
-      // 1. Fetch current user state from DB
-      // CRITICAL FIX: Fetch FULL check_ins structure (with comments) so we don't corrupt the local state
-      // with a partial object (e.g. only dates) when we return the optimistic update.
       const { data: userDB, error: fetchError } = await supabase
         .from('users')
         .select('*, check_ins(*, comments(*))')
@@ -569,14 +567,6 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
 
       // --- SANDBOX MODE FOR TEST USER ---
       if (userDB.name === TEST_USER_EMAIL) {
-          console.log("Sandbox Mode Active: Check-in simulated locally only.");
-          const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
-          const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
-
-          const uiUser = mapUserFromDB(userDB);
-          uiUser.score = newScore;
-          uiUser.streak = newStreak;
-          
           const fakeCheckIn: CheckIn = {
               id: `sandbox-${Date.now()}`,
               date: today,
@@ -588,20 +578,18 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
               comments: []
           };
           
+          const uiUser = mapUserFromDB(userDB);
+          const { score, streak } = calculateStatsFromCheckIns([fakeCheckIn, ...uiUser.checkIns]);
+          uiUser.score = score;
+          uiUser.streak = streak;
           uiUser.checkIns = [fakeCheckIn, ...uiUser.checkIns];
           return uiUser;
       }
 
       const hasCheckInToday = userDB.check_ins.some((c: any) => c.date === today);
       if (hasCheckInToday) {
-          // If already checked in, just return fresh data
           return await loginOrCreateUser(userDB.name);
       }
-      
-      const hasCheckInYesterday = userDB.check_ins.some((c: any) => c.date === yesterdayStr);
-      const { newScore, newStreak } = calculateNewStats(userDB.score || 0, userDB.streak || 0, hasCheckInYesterday);
-
-      // --- CRITICAL FIX: TIMEOUT RACE CONDITION ---
       
       const insertPayload = {
           id: Date.now().toString(),
@@ -614,49 +602,38 @@ export const performCheckIn = async (userId: string, photoBase64: string, captio
           videos: videoBase64 ? [videoBase64] : []
       };
 
-      const insertPromise = supabase.from('check_ins').insert(insertPayload);
-      const updatePromise = supabase.from('users').update({
+      // 1. Insert CheckIn
+      await supabase.from('check_ins').insert(insertPayload);
+
+      // 2. Recalculate Stats based on new list
+      const currentCheckIns = userDB.check_ins.map(mapCheckInFromDB);
+      const newCheckInObj = mapCheckInFromDB(insertPayload);
+      const allCheckIns = [newCheckInObj, ...currentCheckIns];
+      
+      const { score: newScore, streak: newStreak } = calculateStatsFromCheckIns(allCheckIns);
+
+      // 3. Update User Stats
+      await supabase.from('users').update({
           score: newScore,
           streak: newStreak
       }).eq('id', userId);
 
-      const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Supabase Timeout')), 60000); 
-      });
-
-      // Wait for both insert and update OR timeout
-      await Promise.race([Promise.all([insertPromise, updatePromise]), timeoutPromise]);
-
       // Fire and forget provocation check
       processProvocations(userId, userDB.name, userDB.score || 0, newScore);
       
-      // OPTIMISTIC UPDATE:
-      // Instead of fetching from DB (which might be slow to index), construct the new user object manually.
-      // This fixes the "Race Condition" where the user sees the old state after a successful check-in.
-      const optimisticCheckIn: CheckIn = {
-          id: insertPayload.id,
-          date: insertPayload.date,
-          timestamp: insertPayload.timestamp,
-          photo: insertPayload.photo,
-          caption: insertPayload.caption,
-          likes: [],
-          videos: insertPayload.videos,
-          comments: []
-      };
-
+      // OPTIMISTIC UPDATE
       const baseUser = mapUserFromDB(userDB);
       const updatedUser: User = {
           ...baseUser,
           score: newScore,
           streak: newStreak,
-          checkIns: [optimisticCheckIn, ...baseUser.checkIns]
+          checkIns: allCheckIns
       };
 
       return updatedUser;
 
   } catch (err) {
       console.warn("Check-in failed due to timeout or error, switching to Local Mode.", err);
-      // Se falhar o envio para o Supabase (ex: video grande demais), tenta localmente SEM O VÍDEO
       return await saveToLocalFallback(userId, photoBase64, caption, videoBase64);
   }
 };
@@ -715,13 +692,47 @@ export const addComment = async (checkInId: string, userId: string, text: string
 }
 
 export const deleteCheckIn = async (checkInId: string): Promise<void> => {
+    // Need to fetch the checkin first to know the user_id to recalculate stats
+    let userId = '';
+    
+    // Try fetch from DB
+    const { data: checkIn } = await supabase.from('check_ins').select('user_id').eq('id', checkInId).single();
+    if (checkIn) userId = checkIn.user_id;
+    
     await supabase.from('comments').delete().eq('check_in_id', checkInId);
     const { error } = await supabase.from('check_ins').delete().eq('id', checkInId);
-    if (error) {
-        const db = getLocalDB();
-        db.check_ins = db.check_ins.filter((c: any) => c.id !== checkInId);
-        db.comments = db.comments.filter((c: any) => c.check_in_id !== checkInId);
-        saveLocalDB(db);
+    
+    const db = getLocalDB();
+    
+    // Fallback or Local handling
+    if (error || !checkIn) {
+        const localCheckIn = db.check_ins.find((c: any) => c.id === checkInId);
+        if (localCheckIn) {
+            userId = localCheckIn.user_id;
+            db.check_ins = db.check_ins.filter((c: any) => c.id !== checkInId);
+            db.comments = db.comments.filter((c: any) => c.check_in_id !== checkInId);
+            saveLocalDB(db);
+        }
+    }
+
+    // RECALCULATE USER STATS
+    if (userId) {
+        const { data: userDB } = await supabase.from('users').select('*, check_ins(*)').eq('id', userId).single();
+        if (userDB) {
+            const allCheckIns = userDB.check_ins.map(mapCheckInFromDB);
+            const { score, streak } = calculateStatsFromCheckIns(allCheckIns);
+            await supabase.from('users').update({ score, streak }).eq('id', userId);
+        } else {
+             // Local Update
+             const user = db.users.find((u: any) => u.id === userId);
+             if (user) {
+                 const uCheckIns = db.check_ins.filter((c: any) => c.user_id === userId).map(mapCheckInFromDB);
+                 const { score, streak } = calculateStatsFromCheckIns(uCheckIns);
+                 user.score = score;
+                 user.streak = streak;
+                 saveLocalDB(db);
+             }
+        }
     }
 };
 
